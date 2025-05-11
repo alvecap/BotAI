@@ -6,8 +6,8 @@ import time
 import logging
 from datetime import datetime, timedelta
 import requests
-from tabulate import tabulate
 import schedule
+import pytz
 
 # Configuration du logging
 logging.basicConfig(
@@ -39,13 +39,10 @@ class FootballPredictionBot:
         # Variables pour stocker les matchs et prédictions
         self.selected_matches = []
         self.predictions = {}
-        self.coupon_id = datetime.now().strftime("%Y%m%d%H%M")
         self.coupon_total_odds = 0
         
-        # Variables spécifiques pour le stockage des IDs de matchs
-        self.match_ids = []  # IDs des matchs pour vérification
-        self.match_details = {}  # Détails des matchs pour référence (ID -> informations)
-        self.match_end_times = {}  # Heures de fin estimées pour chaque match (ID -> datetime)
+        # Fuseau horaire pour l'Afrique centrale
+        self.timezone = pytz.timezone('Africa/Brazzaville')
     
     def _check_env_variables(self):
         """Vérifie que toutes les variables d'environnement requises sont définies."""
@@ -64,36 +61,46 @@ class FootballPredictionBot:
             error_msg = f"Variables d'environnement manquantes: {', '.join(missing_vars)}"
             logger.error(error_msg)
             raise EnvironmentError(error_msg)
+    
+    def schedule_daily_job(self):
+        """Programme l'exécution quotidienne à 8h00 (heure d'Afrique centrale)."""
+        # Exécuter immédiatement au démarrage
+        self.run_prediction_job()
         
-    def run(self):
-        """Fonction principale pour exécuter le bot."""
-        logger.info("=== DÉMARRAGE DU BOT DE PRÉDICTIONS FOOTBALL ===")
-        logger.info(f"Date/heure actuelle: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
+        # Planifier l'exécution quotidienne à 8h00
+        schedule.every().day.at("08:00").do(self.run_prediction_job)
         
-        # Sélectionner les matchs à venir entre 10h00 et 11h00
-        self.select_upcoming_matches()
+        logger.info("Bot programmé pour s'exécuter tous les jours à 08:00 (heure d'Afrique centrale)")
+        
+        # Maintenir le script en fonctionnement
+        while True:
+            schedule.run_pending()
+            time.sleep(60)
+    
+    def run_prediction_job(self):
+        """Fonction principale d'exécution du job de prédiction."""
+        logger.info("=== DÉMARRAGE DU JOB DE PRÉDICTIONS FOOTBALL ===")
+        
+        now = datetime.now(self.timezone)
+        logger.info(f"Date/heure actuelle: {now.strftime('%d/%m/%Y %H:%M:%S')}")
+        
+        # Réinitialiser les variables
+        self.selected_matches = []
+        self.predictions = {}
+        self.coupon_total_odds = 1.0
+        
+        # Sélectionner les matchs du jour
+        self.select_todays_matches()
         
         # Si des matchs ont été trouvés
         if self.selected_matches:
-            # Enregistrer les IDs des matchs et leurs détails
-            self.store_match_ids()
-            
             # Générer des prédictions
             self.generate_predictions()
             
             # Envoyer le coupon sur Telegram
             self.send_predictions_to_telegram()
-            
-            # Programmer la vérification des résultats
-            self.schedule_results_verification()
-            
-            # Garder le script en fonctionnement
-            logger.info("Bot en attente des résultats des matchs...")
-            while True:
-                schedule.run_pending()
-                time.sleep(60)
         else:
-            logger.error("Aucun match trouvé pour la période spécifiée (10h-11h). Arrêt du bot.")
+            logger.error("Aucun match trouvé pour aujourd'hui. Arrêt du job.")
     
     def make_api_request(self, endpoint):
         """Effectue une requête API avec gestion des erreurs et des tentatives."""
@@ -124,18 +131,17 @@ class FootballPredictionBot:
         logger.error(f"Échec de la requête après {max_retries} tentatives: {endpoint}")
         return None
     
-    def get_upcoming_matches(self):
-        """Récupère les matchs à venir entre 10h et 11h aujourd'hui."""
-        # Définir la plage horaire pour les matchs (entre 10h00 et 11h00 aujourd'hui)
-        now = datetime.now()
-        today_10am = datetime(now.year, now.month, now.day, 10, 0, 0)
-        today_11am = datetime(now.year, now.month, now.day, 11, 0, 0)
+    def get_todays_matches(self):
+        """Récupère les matchs du jour."""
+        # Définir la plage horaire pour les matchs (aujourd'hui)
+        now = datetime.now(self.timezone)
+        today_start = datetime(now.year, now.month, now.day, 0, 0, 0, tzinfo=self.timezone)
+        today_end = datetime(now.year, now.month, now.day, 23, 59, 59, tzinfo=self.timezone)
         
-        start_timestamp = int(today_10am.timestamp())
-        end_timestamp = int(today_11am.timestamp())
+        start_timestamp = int(today_start.timestamp())
+        end_timestamp = int(today_end.timestamp())
         
-        logger.info(f"Recherche de matchs entre {today_10am.strftime('%d/%m/%Y %H:%M')} et {today_11am.strftime('%d/%m/%Y %H:%M')}...")
-        logger.info(f"Timestamps: {start_timestamp} - {end_timestamp}")
+        logger.info(f"Recherche de matchs pour aujourd'hui ({now.strftime('%d/%m/%Y')})...")
         
         # Liste pour stocker tous les matchs trouvés
         all_matches = []
@@ -174,7 +180,7 @@ class FootballPredictionBot:
             
             matches = response.get("data", [])
             
-            # Filtrer les matchs qui se déroulent dans la plage horaire spécifiée
+            # Filtrer les matchs qui se déroulent aujourd'hui
             league_matches_count = 0
             for match in matches:
                 match_timestamp = match.get("start_timestamp", 0)
@@ -187,96 +193,40 @@ class FootballPredictionBot:
                     league_matches_count += 1
             
             if league_matches_count > 0:
-                logger.info(f"Trouvé {league_matches_count} match(s) entre 10h-11h pour {league_name}")
+                logger.info(f"Trouvé {league_matches_count} match(s) pour aujourd'hui dans {league_name}")
             
             # Attendre un court moment entre les requêtes pour éviter les limites d'API
             time.sleep(0.5)
         
-        logger.info(f"Total des matchs trouvés entre 10h-11h: {len(all_matches)}")
+        logger.info(f"Total des matchs trouvés pour aujourd'hui: {len(all_matches)}")
         return all_matches
     
-    def select_upcoming_matches(self):
-        """Sélectionne 1 ou 2 matchs parmi les matchs entre 10h-11h."""
-        all_matches = self.get_upcoming_matches()
+    def select_todays_matches(self):
+        """Sélectionne jusqu'à 5 matchs parmi les matchs du jour."""
+        all_matches = self.get_todays_matches()
         
         if not all_matches:
-            logger.warning("Aucun match trouvé entre 10h-11h.")
+            logger.warning("Aucun match trouvé pour aujourd'hui.")
             return
         
-        # Limiter à 1 ou 2 matchs maximum
-        max_matches = min(2, len(all_matches))
-        num_matches = random.randint(1, max_matches)
+        # Limiter à 5 matchs maximum
+        max_matches = min(5, len(all_matches))
         
-        if len(all_matches) <= num_matches:
+        if len(all_matches) <= max_matches:
             self.selected_matches = all_matches
         else:
-            self.selected_matches = random.sample(all_matches, num_matches)
+            self.selected_matches = random.sample(all_matches, max_matches)
         
         logger.info(f"=== SÉLECTION DE {len(self.selected_matches)} MATCH(S) POUR LES PRÉDICTIONS ===")
         
         # Afficher les matchs sélectionnés
         for i, match in enumerate(self.selected_matches):
             start_timestamp = match.get("start_timestamp", 0)
-            start_time = datetime.fromtimestamp(start_timestamp)
-            
-            # Calculer l'heure de fin estimée (2h après le début pour un match de football)
-            end_time = start_time + timedelta(hours=2)
+            start_time = datetime.fromtimestamp(start_timestamp, self.timezone)
             
             logger.info(f"Match {i+1}: {match.get('home_team')} vs {match.get('away_team')} - {match.get('league_name')}")
             logger.info(f"  ID: {match.get('id')}")
-            logger.info(f"  Début: {start_time.strftime('%d/%m/%Y %H:%M')}")
-            logger.info(f"  Fin estimée: {end_time.strftime('%d/%m/%Y %H:%M')}")
-    
-    def store_match_ids(self):
-        """Stocke les IDs des matchs sélectionnés pour vérification ultérieure."""
-        logger.info("=== STOCKAGE DES IDs DE MATCHS POUR VÉRIFICATION ===")
-        
-        for match in self.selected_matches:
-            match_id = match.get("id")
-            self.match_ids.append(match_id)
-            
-            # Stocker les détails du match
-            self.match_details[match_id] = {
-                "home_team": match.get("home_team"),
-                "away_team": match.get("away_team"),
-                "league_name": match.get("league_name"),
-                "league_id": match.get("league_id"),
-                "start_timestamp": match.get("start_timestamp")
-            }
-            
-            # Calculer et stocker l'heure de fin estimée
-            start_time = datetime.fromtimestamp(match.get("start_timestamp", 0))
-            end_time = start_time + timedelta(hours=2)  # Estimer 2h pour un match de football
-            self.match_end_times[match_id] = end_time
-            
-            logger.info(f"ID du match: {match_id} | {match.get('home_team')} vs {match.get('away_team')}")
-            logger.info(f"  Heure de fin estimée: {end_time.strftime('%d/%m/%Y %H:%M')}")
-        
-        # Afficher un résumé
-        logger.info(f"IDs des matchs stockés: {self.match_ids}")
-        
-        # Sauvegarder ces informations dans un fichier pour référence
-        self.save_match_ids_to_file()
-    
-    def save_match_ids_to_file(self):
-        """Sauvegarde les IDs des matchs et leurs détails dans un fichier."""
-        try:
-            data_to_save = {
-                "coupon_id": self.coupon_id,
-                "match_ids": self.match_ids,
-                "match_details": self.match_details,
-                "end_times": {match_id: end_time.strftime('%Y-%m-%d %H:%M:%S') 
-                              for match_id, end_time in self.match_end_times.items()}
-            }
-            
-            filename = f"match_ids_{self.coupon_id}.json"
-            
-            with open(filename, 'w', encoding='utf-8') as f:
-                json.dump(data_to_save, f, indent=2, ensure_ascii=False)
-            
-            logger.info(f"IDs des matchs sauvegardés dans {filename}")
-        except Exception as e:
-            logger.error(f"Erreur lors de la sauvegarde des IDs: {str(e)}")
+            logger.info(f"  Heure de début: {start_time.strftime('%d/%m/%Y %H:%M')}")
     
     def get_match_odds(self, match_id):
         """Récupère les cotes pour un match spécifique."""
@@ -289,135 +239,328 @@ class FootballPredictionBot:
         
         return response.get("data", {})
     
+    def is_handicap_king_applicable(self, markets):
+        """Vérifie si la stratégie 'Le Handicap du Roi' est applicable."""
+        if "1" not in markets or "16" not in markets:  # 1 = 1X2, 16 = Handicap
+            return False, None
+        
+        # Trouver la cote pour la victoire simple
+        victory_odds = None
+        for outcome in markets["1"].get("outcomes", []):
+            if outcome.get("name") == "1":  # Victoire domicile
+                victory_odds = outcome.get("odds")
+                break
+        
+        if not victory_odds or victory_odds > 1.90:
+            return False, None
+        
+        # Trouver la cote pour la victoire avec handicap -1
+        handicap_odds = None
+        for outcome in markets["16"].get("outcomes", []):
+            if "1" in outcome.get("name", "") and "-1" in outcome.get("name", ""):
+                handicap_odds = outcome.get("odds")
+                break
+        
+        if not handicap_odds:
+            return False, None
+        
+        # Calculer l'écart entre les deux cotes
+        odds_difference = handicap_odds - victory_odds
+        
+        # Vérifier si l'écart est dans la plage souhaitée (0.35-0.60)
+        if 0.35 <= odds_difference <= 0.60:
+            return True, {"type": "Handicap -1", "odds": handicap_odds}
+        
+        return False, None
+    
+    def is_first_half_goal_applicable(self, markets):
+        """Vérifie si la stratégie 'Le Premier Feu Sacré' est applicable."""
+        # Rechercher la cote pour +1.5 buts en première mi-temps
+        first_half_over = None
+        
+        # Parcourir différents marchés possibles pour trouver la cote
+        for market_id in markets:
+            market = markets[market_id]
+            if "first half" in market.get("name", "").lower() and "total" in market.get("name", "").lower():
+                for outcome in market.get("outcomes", []):
+                    if "over 1.5" in outcome.get("name", "").lower():
+                        first_half_over = outcome.get("odds")
+                        break
+        
+        if not first_half_over or first_half_over > 1.80:
+            return False, None
+        
+        # Trouver la cote pour +0.5 but en première mi-temps (cote généralement basse)
+        first_half_one_goal = None
+        for market_id in markets:
+            market = markets[market_id]
+            if "first half" in market.get("name", "").lower() and "total" in market.get("name", "").lower():
+                for outcome in market.get("outcomes", []):
+                    if "over 0.5" in outcome.get("name", "").lower():
+                        first_half_one_goal = outcome.get("odds")
+                        break
+        
+        if not first_half_one_goal:
+            return False, None
+        
+        return True, {"type": "+0.5 but 1ère mi-temps", "odds": first_half_one_goal}
+    
+    def is_trapped_draw_applicable(self, markets):
+        """Vérifie si la stratégie 'Le Nul Piégé' est applicable."""
+        if "1" not in markets:  # 1 = 1X2
+            return False, None
+        
+        # Récupérer les cotes 1X2
+        home_odds = away_odds = draw_odds = None
+        for outcome in markets["1"].get("outcomes", []):
+            if outcome.get("name") == "1":  # Victoire domicile
+                home_odds = outcome.get("odds")
+            elif outcome.get("name") == "2":  # Victoire extérieur
+                away_odds = outcome.get("odds")
+            elif outcome.get("name") == "X":  # Match nul
+                draw_odds = outcome.get("odds")
+        
+        if not all([home_odds, away_odds, draw_odds]):
+            return False, None
+        
+        # Vérifier si la cote du match nul est <= 3.50
+        if draw_odds <= 3.50:
+            # Déterminer quelle équipe est favorite
+            if home_odds < away_odds:
+                return True, {"type": "1X", "odds": min(1.70, home_odds * 0.70)}  # Double chance domicile ou nul
+            else:
+                return True, {"type": "X2", "odds": min(1.70, away_odds * 0.70)}  # Double chance extérieur ou nul
+        
+        return False, None
+    
+    def is_both_teams_to_score_applicable(self, markets):
+        """Vérifie si la stratégie 'Le Pacte des Deux Buteurs' est applicable."""
+        home_total_over = away_total_over = match_total_over = None
+        
+        # Rechercher les cotes pour les totaux
+        for market_id in markets:
+            market = markets[market_id]
+            # Recherche du total pour l'équipe à domicile
+            if "team 1" in market.get("name", "").lower() and "total" in market.get("name", "").lower():
+                for outcome in market.get("outcomes", []):
+                    if "over 1.5" in outcome.get("name", "").lower():
+                        home_total_over = outcome.get("odds")
+            
+            # Recherche du total pour l'équipe à l'extérieur
+            elif "team 2" in market.get("name", "").lower() and "total" in market.get("name", "").lower():
+                for outcome in market.get("outcomes", []):
+                    if "over 1.5" in outcome.get("name", "").lower():
+                        away_total_over = outcome.get("odds")
+            
+            # Recherche du total pour le match
+            elif "total" in market.get("name", "").lower() and not "team" in market.get("name", "").lower():
+                for outcome in market.get("outcomes", []):
+                    if "over 2.5" in outcome.get("name", "").lower():
+                        match_total_over = outcome.get("odds")
+        
+        # Rechercher la cote pour "Les deux équipes marquent"
+        btts_odds = None
+        for market_id in markets:
+            market = markets[market_id]
+            if "both teams to score" in market.get("name", "").lower():
+                for outcome in market.get("outcomes", []):
+                    if outcome.get("name", "").lower() in ["yes", "oui"]:
+                        btts_odds = outcome.get("odds")
+        
+        # Vérifier les conditions pour appliquer la stratégie
+        if (home_total_over and home_total_over <= 2.00 and
+            away_total_over and away_total_over <= 2.20 and
+            match_total_over and match_total_over <= 1.70 and
+            btts_odds):
+            return True, {"type": "Les 2 équipes marquent", "odds": btts_odds}
+        
+        return False, None
+    
+    def is_under_goals_applicable(self, markets):
+        """Vérifie si la stratégie pour parier sur moins de buts est applicable."""
+        # Rechercher les cotes pour les scores exacts
+        if "18" not in markets:  # 18 = Score exact
+            return False, None
+        
+        scores = []
+        for outcome in markets["18"].get("outcomes", []):
+            scores.append({"name": outcome.get("name"), "odds": outcome.get("odds")})
+        
+        # Trier les scores par cote (du plus bas au plus haut)
+        scores.sort(key=lambda x: x["odds"])
+        
+        # Vérifier si les 3 cotes les plus basses sont toutes < 7.00
+        if len(scores) >= 3 and all(score["odds"] < 7.00 for score in scores[:3]):
+            # Rechercher la cote pour "Moins de 3,5 buts"
+            under_odds = None
+            for market_id in markets:
+                market = markets[market_id]
+                if "total" in market.get("name", "").lower():
+                    for outcome in market.get("outcomes", []):
+                        if "under 3.5" in outcome.get("name", "").lower():
+                            under_odds = outcome.get("odds")
+            
+            if under_odds:
+                return True, {"type": "-3.5 buts", "odds": under_odds}
+        
+        return False, None
+    
+    def determine_best_prediction(self, match_id, home_team, away_team, markets):
+        """Détermine la meilleure prédiction pour un match en fonction des stratégies."""
+        predictions = []
+        
+        # Vérifier chaque stratégie
+        handicap_king, handicap_pred = self.is_handicap_king_applicable(markets)
+        if handicap_king:
+            predictions.append({
+                "strategy": "Le Handicap du Roi",
+                "prediction": f"{home_team} gagne",
+                "type": handicap_pred["type"],
+                "odds": handicap_pred["odds"],
+                "confidence": 0.85
+            })
+        
+        first_half_goal, first_half_pred = self.is_first_half_goal_applicable(markets)
+        if first_half_goal:
+            predictions.append({
+                "strategy": "Le Premier Feu Sacré",
+                "prediction": first_half_pred["type"],
+                "type": first_half_pred["type"],
+                "odds": first_half_pred["odds"],
+                "confidence": 0.80
+            })
+        
+        trapped_draw, draw_pred = self.is_trapped_draw_applicable(markets)
+        if trapped_draw:
+            predictions.append({
+                "strategy": "Le Nul Piégé",
+                "prediction": draw_pred["type"],
+                "type": draw_pred["type"],
+                "odds": draw_pred["odds"],
+                "confidence": 0.75
+            })
+        
+        btts, btts_pred = self.is_both_teams_to_score_applicable(markets)
+        if btts:
+            predictions.append({
+                "strategy": "Le Pacte des Deux Buteurs",
+                "prediction": btts_pred["type"],
+                "type": btts_pred["type"],
+                "odds": btts_pred["odds"],
+                "confidence": 0.78
+            })
+        
+        under_goals, under_pred = self.is_under_goals_applicable(markets)
+        if under_goals:
+            predictions.append({
+                "strategy": "Le Poids des Petites Cotes",
+                "prediction": under_pred["type"],
+                "type": under_pred["type"],
+                "odds": under_pred["odds"],
+                "confidence": 0.82
+            })
+        
+        # Si aucune prédiction n'est applicable, retourner None
+        if not predictions:
+            return None
+        
+        # Trier les prédictions par niveau de confiance (du plus élevé au plus bas)
+        predictions.sort(key=lambda x: x["confidence"], reverse=True)
+        
+        # Retourner la prédiction avec le niveau de confiance le plus élevé
+        best_prediction = predictions[0]
+        
+        return {
+            "match_id": match_id,
+            "home_team": home_team,
+            "away_team": away_team,
+            "prediction": best_prediction["prediction"],
+            "type": best_prediction["type"],
+            "odds": best_prediction["odds"],
+            "strategy": best_prediction["strategy"],
+            "confidence": best_prediction["confidence"]
+        }
+    
     def generate_predictions(self):
-        """Génère des prédictions aléatoires pour les matchs sélectionnés."""
+        """Génère les meilleures prédictions pour les matchs sélectionnés."""
         logger.info("=== GÉNÉRATION DES PRÉDICTIONS ===")
         
-        # Types de prédictions possibles
-        prediction_types = [
-            {"id": "1", "name": "1X2", "outcomes": ["1", "X", "2"]},
-            {"id": "17", "name": "Total", "outcomes": ["Under 2.5", "Over 2.5", "Under 3.5", "Over 3.5"]},
-            {"id": "12", "name": "Double Chance", "outcomes": ["1X", "12", "X2"]},
-            {"id": "9", "name": "Les deux équipes marquent", "outcomes": ["Oui", "Non"]}
-        ]
-        
-        self.coupon_total_odds = 1.0
+        valid_predictions = 0
         
         for match in self.selected_matches:
             match_id = match.get("id")
             home_team = match.get("home_team")
             away_team = match.get("away_team")
+            league_name = match.get("league_name", "Ligue inconnue")
             
-            logger.info(f"Génération de prédiction pour {home_team} vs {away_team} (ID: {match_id})...")
+            logger.info(f"Analyse du match {home_team} vs {away_team} (ID: {match_id})...")
             
             # Récupérer les cotes pour ce match
             markets = self.get_match_odds(match_id)
             
             if not markets:
-                logger.warning(f"Pas de cotes disponibles pour {home_team} vs {away_team}, génération aléatoire")
-                
-                # Générer une prédiction et une cote aléatoire si les cotes ne sont pas disponibles
-                pred_type = random.choice(prediction_types)
-                outcome = random.choice(pred_type["outcomes"])
-                odds = round(random.uniform(1.5, 3.0), 2)
-                
-                self.predictions[match_id] = {
-                    "match_id": match_id,
-                    "home_team": home_team,
-                    "away_team": away_team,
-                    "league_name": match.get("league_name", "Ligue inconnue"),
-                    "start_timestamp": match.get("start_timestamp", 0),
-                    "prediction_type": pred_type["name"],
-                    "prediction": outcome,
-                    "odds": odds
-                }
-                
-                logger.info(f"  Prédiction générée: {pred_type['name']} - {outcome} (Cote: {odds})")
-            else:
-                # Choisir un type de prédiction aléatoire
-                pred_type = random.choice(prediction_types)
-                pred_id = pred_type["id"]
-                
-                # Vérifier si ce type de marché est disponible
-                if pred_id in markets:
-                    # Choisir un résultat aléatoire dans ce marché
-                    outcomes = markets[pred_id].get("outcomes", [])
-                    if outcomes:
-                        outcome = random.choice(outcomes)
-                        
-                        self.predictions[match_id] = {
-                            "match_id": match_id,
-                            "home_team": home_team,
-                            "away_team": away_team,
-                            "league_name": match.get("league_name", "Ligue inconnue"),
-                            "start_timestamp": match.get("start_timestamp", 0),
-                            "prediction_type": pred_type["name"],
-                            "prediction": outcome.get("name"),
-                            "odds": outcome.get("odds")
-                        }
-                        
-                        logger.info(f"  Prédiction: {pred_type['name']} - {outcome.get('name')} (Cote: {outcome.get('odds')})")
-                    else:
-                        # Si pas d'options dans ce marché, générer aléatoirement
-                        outcome = random.choice(pred_type["outcomes"])
-                        odds = round(random.uniform(1.5, 3.0), 2)
-                        
-                        self.predictions[match_id] = {
-                            "match_id": match_id,
-                            "home_team": home_team,
-                            "away_team": away_team,
-                            "league_name": match.get("league_name", "Ligue inconnue"),
-                            "start_timestamp": match.get("start_timestamp", 0),
-                            "prediction_type": pred_type["name"],
-                            "prediction": outcome,
-                            "odds": odds
-                        }
-                        
-                        logger.info(f"  Prédiction générée: {pred_type['name']} - {outcome} (Cote: {odds})")
-                else:
-                    # Si ce type de marché n'est pas disponible, générer aléatoirement
-                    outcome = random.choice(pred_type["outcomes"])
-                    odds = round(random.uniform(1.5, 3.0), 2)
-                    
-                    self.predictions[match_id] = {
-                        "match_id": match_id,
-                        "home_team": home_team,
-                        "away_team": away_team,
-                        "league_name": match.get("league_name", "Ligue inconnue"),
-                        "start_timestamp": match.get("start_timestamp", 0),
-                        "prediction_type": pred_type["name"],
-                        "prediction": outcome,
-                        "odds": odds
-                    }
-                    
-                    logger.info(f"  Prédiction générée: {pred_type['name']} - {outcome} (Cote: {odds})")
+                logger.warning(f"Pas de cotes disponibles pour {home_team} vs {away_team}, match ignoré")
+                continue
             
-            # Multiplier la cote totale
-            self.coupon_total_odds *= self.predictions[match_id]["odds"]
+            # Déterminer la meilleure prédiction pour ce match
+            best_prediction = self.determine_best_prediction(match_id, home_team, away_team, markets)
+            
+            if best_prediction:
+                # Ajouter les informations supplémentaires
+                best_prediction["league_name"] = league_name
+                best_prediction["start_timestamp"] = match.get("start_timestamp", 0)
+                
+                # Stocker la prédiction
+                self.predictions[match_id] = best_prediction
+                valid_predictions += 1
+                
+                logger.info(f"  Prédiction pour {home_team} vs {away_team}: {best_prediction['prediction']} (Cote: {best_prediction['odds']})")
+                logger.info(f"  Stratégie utilisée: {best_prediction['strategy']}")
+            else:
+                logger.warning(f"Aucune prédiction fiable trouvée pour {home_team} vs {away_team}")
         
-        # Arrondir la cote totale
-        self.coupon_total_odds = round(self.coupon_total_odds, 2)
+        # Calculer la cote totale du coupon
+        if self.predictions:
+            self.coupon_total_odds = 1.0
+            for match_id, pred in self.predictions.items():
+                self.coupon_total_odds *= pred["odds"]
+            self.coupon_total_odds = round(self.coupon_total_odds, 2)
         
-        logger.info(f"Prédictions générées pour {len(self.predictions)} match(s) avec une cote totale de {self.coupon_total_odds}")
+        logger.info(f"Prédictions générées pour {valid_predictions} match(s) avec une cote totale de {self.coupon_total_odds}")
     
     def format_prediction_message(self):
         """Formate le message de prédiction pour Telegram."""
-        date_str = datetime.now().strftime("%d/%m/%Y")
+        now = datetime.now(self.timezone)
+        date_str = now.strftime("%d/%m/%Y")
         
-        message = f"🔮 *COUPON DE PRÉDICTIONS - {date_str}* 🔮\n\n"
-        message += f"📝 *ID du Coupon:* {self.coupon_id}\n\n"
+        message = f"🔮 *COUPON DE PRÉDICTIONS DU JOUR* 🔮\n"
+        message += f"📅 *{date_str}*\n\n"
         
+        # Si aucune prédiction n'a été générée
+        if not self.predictions:
+            message += "_Aucune prédiction fiable n'a pu être générée pour aujourd'hui. Revenez demain!_"
+            return message
+        
+        # Ajouter chaque prédiction au message
         for i, (match_id, pred) in enumerate(self.predictions.items()):
-            start_time = datetime.fromtimestamp(pred["start_timestamp"]).strftime("%H:%M")
+            # Séparateur
+            if i > 0:
+                message += "----------------------------\n\n"
             
-            message += f"*MATCH {i+1}:*\n"
-            message += f"🏆 {pred['league_name']}\n"
-            message += f"⚽ {pred['home_team']} vs {pred['away_team']} ({start_time})\n"
-            message += f"🎯 *Prédiction:* {pred['prediction_type']} - {pred['prediction']}\n"
+            # Calculer l'heure du match au format local
+            start_time = datetime.fromtimestamp(pred["start_timestamp"], self.timezone).strftime("%H:%M")
+            
+            message += f"🏆 *{pred['league_name'].upper()}*\n"
+            message += f"⚽ *{pred['home_team']} vs {pred['away_team']}* | {start_time}\n"
+            message += f"🎯 *Prédiction:* {pred['prediction']}\n"
             message += f"💰 *Cote:* {pred['odds']}\n\n"
         
-        message += f"*📈 COTE TOTALE DU COUPON: {self.coupon_total_odds}*\n\n"
-        message += "⏳ _Les résultats seront vérifiés automatiquement après les matchs_"
+        # Ajouter la cote totale
+        message += f"----------------------------\n\n"
+        message += f"📊 *COTE TOTALE:* {self.coupon_total_odds}\n\n"
+        
+        # Conseil de bankroll
+        message += f"💡 _Conseil: Investissez 5% de votre capital sur ce coupon pour une gestion optimale de votre bankroll._"
         
         return message
     
@@ -456,330 +599,12 @@ class FootballPredictionBot:
             logger.info("Prédictions envoyées avec succès")
         else:
             logger.error("Échec de l'envoi des prédictions")
-    
-    def schedule_results_verification(self):
-        """Planifie la vérification des résultats des matchs."""
-        # Trouver le dernier match à se terminer
-        if not self.match_end_times:
-            logger.error("Aucune heure de fin estimée disponible. Impossible de planifier la vérification.")
-            return
-        
-        # Obtenir l'heure de fin la plus tardive
-        last_end_time = max(self.match_end_times.values())
-        
-        # Ajouter 5 minutes pour s'assurer que les résultats sont disponibles
-        first_check_time = last_end_time + timedelta(minutes=5)
-        
-        now = datetime.now()
-        logger.info(f"Heure actuelle: {now.strftime('%d/%m/%Y %H:%M')}")
-        logger.info(f"Dernière heure de fin estimée: {last_end_time.strftime('%d/%m/%Y %H:%M')}")
-        logger.info(f"Première vérification prévue à: {first_check_time.strftime('%d/%m/%Y %H:%M')}")
-        
-        if first_check_time < now:
-            # Si l'heure de vérification est déjà passée, commencer immédiatement
-            logger.info("L'heure de vérification est déjà passée, vérification immédiate...")
-            self.verify_results()
-            # Puis vérifier toutes les 10 minutes
-            schedule.every(10).minutes.do(self.verify_results)
-        else:
-            # Programmer la première vérification
-            time_until_first_check = (first_check_time - now).total_seconds() / 60
-            logger.info(f"Première vérification dans environ {round(time_until_first_check)} minutes")
-            
-            # Programmer pour la première vérification
-            schedule.every(round(time_until_first_check)).minutes.do(self.verify_results)
-            # Ensuite vérifier toutes les 10 minutes
-            schedule.every(10).minutes.do(self.verify_results)
-    
-    def get_match_results(self, match_id):
-        """Récupère les résultats d'un match terminé."""
-        logger.info(f"Vérification des résultats pour le match ID: {match_id}")
-        
-        # Récupérer les détails du match pour référence
-        match_details = self.match_details.get(match_id, {})
-        home_team = match_details.get("home_team", "Équipe inconnue")
-        away_team = match_details.get("away_team", "Équipe inconnue")
-        
-        endpoint = f"/matches/{match_id}?mode=line&lng=en"
-        response = self.make_api_request(endpoint)
-        
-        if not response or response.get("status") != "success":
-            logger.warning(f"Impossible de récupérer les résultats pour {home_team} vs {away_team} (ID: {match_id})")
-            return None
-        
-        match_data = response.get("data", {})
-        
-        # Afficher le statut du match pour le débogage
-        status = match_data.get("status", "inconnu")
-        logger.info(f"Statut du match {match_id} ({home_team} vs {away_team}): {status}")
-        
-        # Vérifier tous les champs possibles qui pourraient indiquer que le match est terminé
-        is_finished = (
-            status == "finished" or
-            match_data.get("is_live") == False or  # Le match n'est plus en direct
-            match_data.get("time_status") == 3 or  # Possiblement un code pour "terminé"
-            match_data.get("status_name") == "finished"  # Autre champ possible
-        )
-        
-        # Afficher des détails supplémentaires pour le débogage
-        logger.info(f"  is_live: {match_data.get('is_live')}")
-        logger.info(f"  time_status: {match_data.get('time_status')}")
-        logger.info(f"  status_name: {match_data.get('status_name')}")
-        
-        if is_finished:
-            home_score = match_data.get("score_home", "?")
-            away_score = match_data.get("score_away", "?")
-            
-            logger.info(f"Match terminé: {home_team} {home_score} - {away_score} {away_team}")
-            
-            return {
-                "home_score": home_score,
-                "away_score": away_score,
-                "finished": True
-            }
-        else:
-            logger.info(f"Le match n'est pas encore terminé: {home_team} vs {away_team}")
-            return {"finished": False}
-    
-    def check_prediction_outcome(self, prediction, match_result):
-        """Vérifie si une prédiction était correcte."""
-        pred_type = prediction["prediction_type"]
-        pred_value = prediction["prediction"]
-        
-        home_score = int(match_result["home_score"])
-        away_score = int(match_result["away_score"])
-        total_goals = home_score + away_score
-        
-        logger.info(f"Vérification de la prédiction: {pred_type} - {pred_value}")
-        logger.info(f"Score final: {home_score} - {away_score} (Total: {total_goals})")
-        
-        # Vérifier selon le type de prédiction
-        if pred_type == "1X2":
-            if pred_value == "1" and home_score > away_score:
-                logger.info("Prédiction CORRECTE: Victoire à domicile")
-                return True
-            elif pred_value == "X" and home_score == away_score:
-                logger.info("Prédiction CORRECTE: Match nul")
-                return True
-            elif pred_value == "2" and home_score < away_score:
-                logger.info("Prédiction CORRECTE: Victoire à l'extérieur")
-                return True
-        
-        elif pred_type == "Total":
-            if "Under 2.5" in pred_value and total_goals < 2.5:
-                logger.info("Prédiction CORRECTE: Moins de 2.5 buts")
-                return True
-            elif "Over 2.5" in pred_value and total_goals > 2.5:
-                logger.info("Prédiction CORRECTE: Plus de 2.5 buts")
-                return True
-            elif "Under 3.5" in pred_value and total_goals < 3.5:
-                logger.info("Prédiction CORRECTE: Moins de 3.5 buts")
-                return True
-            elif "Over 3.5" in pred_value and total_goals > 3.5:
-                logger.info("Prédiction CORRECTE: Plus de 3.5 buts")
-                return True
-        
-        elif pred_type == "Double Chance":
-            if "1X" in pred_value and (home_score >= away_score):
-                logger.info("Prédiction CORRECTE: 1X (Victoire domicile ou nul)")
-                return True
-            elif "12" in pred_value and (home_score != away_score):
-                logger.info("Prédiction CORRECTE: 12 (Pas de match nul)")
-                return True
-            elif "X2" in pred_value and (home_score <= away_score):
-                logger.info("Prédiction CORRECTE: X2 (Match nul ou victoire extérieure)")
-                return True
-        
-        elif pred_type == "Les deux équipes marquent":
-            both_teams_scored = home_score > 0 and away_score > 0
-            if pred_value == "Oui" and both_teams_scored:
-                logger.info("Prédiction CORRECTE: Les deux équipes ont marqué")
-                return True
-            elif pred_value == "Non" and not both_teams_scored:
-                logger.info("Prédiction CORRECTE: Au moins une équipe n'a pas marqué")
-                return True
-        
-        logger.info("Prédiction INCORRECTE")
-        return False
-    
-    def verify_results(self):
-        """Vérifie les résultats des matchs et détermine si le coupon est gagnant."""
-        logger.info("=== VÉRIFICATION DES RÉSULTATS DES MATCHS ===")
-        logger.info(f"Heure actuelle: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
-        logger.info(f"IDs des matchs à vérifier: {self.match_ids}")
-        
-        results = {}
-        all_finished = True
-        winning_predictions = 0
-        
-        for match_id in self.match_ids:
-            # Récupérer les informations du match pour référence
-            match_details = self.match_details.get(match_id, {})
-            home_team = match_details.get("home_team", "Équipe inconnue")
-            away_team = match_details.get("away_team", "Équipe inconnue")
-            
-            logger.info(f"Vérification du match: {home_team} vs {away_team} (ID: {match_id})")
-            
-            match_result = self.get_match_results(match_id)
-            
-            if not match_result:
-                logger.warning(f"Pas de résultat disponible pour {home_team} vs {away_team}")
-                all_finished = False
-                continue
-            
-            if not match_result.get("finished", False):
-                logger.info(f"Le match {home_team} vs {away_team} n'est pas encore terminé.")
-                all_finished = False
-                continue
-            
-            # Le match est terminé, vérifier la prédiction
-            logger.info(f"Le match {home_team} vs {away_team} est terminé.")
-            
-            # Récupérer la prédiction pour ce match
-            if match_id not in self.predictions:
-                logger.error(f"Aucune prédiction trouvée pour le match ID: {match_id}")
-                continue
-            
-            prediction = self.predictions[match_id]
-            
-            # Déterminer si la prédiction était correcte
-            is_winner = self.check_prediction_outcome(prediction, match_result)
-            
-            results[match_id] = {
-                "prediction": prediction,
-                "result": match_result,
-                "is_winner": is_winner
-            }
-            
-            if is_winner:
-                winning_predictions += 1
-        
-        # Si tous les matchs sont terminés, envoyer les résultats
-        if all_finished:
-            logger.info("=== TOUS LES MATCHS SONT TERMINÉS ===")
-            
-            # Déterminer si le coupon est gagnant (toutes les prédictions doivent être correctes)
-            coupon_is_winner = winning_predictions == len(self.predictions)
-            
-            if coupon_is_winner:
-                logger.info("COUPON GAGNANT! Toutes les prédictions étaient correctes.")
-            else:
-                logger.info(f"COUPON PERDANT. {winning_predictions}/{len(self.predictions)} prédictions correctes.")
-            
-            # Envoyer le message de résultat
-            self.send_results_to_telegram(results, coupon_is_winner)
-            
-            # Arrêter la planification
-            logger.info("Fin des vérifications. Nettoyage...")
-            return schedule.CancelJob
-        else:
-            logger.info("Certains matchs ne sont pas encore terminés, nouvelle vérification dans 10 minutes...")
-            
-            # Afficher les matchs en attente
-            pending_matches = []
-            for match_id in self.match_ids:
-                if match_id not in results or not results[match_id]["result"].get("finished", False):
-                    match_details = self.match_details.get(match_id, {})
-                    pending_matches.append(f"{match_details.get('home_team')} vs {match_details.get('away_team')} (ID: {match_id})")
-            
-            logger.info(f"Matchs en attente: {', '.join(pending_matches)}")
-    
-    def format_results_message(self, results, coupon_is_winner):
-        """Formate le message de résultat pour Telegram."""
-        date_str = datetime.now().strftime("%d/%m/%Y")
-        
-        if coupon_is_winner:
-            message = f"🏆 *COUPON GAGNANT - {date_str}* 🏆\n\n"
-        else:
-            message = f"❌ *COUPON PERDANT - {date_str}* ❌\n\n"
-        
-        message += f"📝 *ID du Coupon:* {self.coupon_id}\n\n"
-        
-        for i, match_id in enumerate(self.match_ids):
-            if match_id not in results:
-                continue
-                
-            result_data = results[match_id]
-            pred = result_data["prediction"]
-            res = result_data["result"]
-            is_winner = result_data["is_winner"]
-            
-            message += f"*MATCH {i+1}:*\n"
-            message += f"🏆 {pred['league_name']}\n"
-            message += f"⚽ {pred['home_team']} vs {pred['away_team']}\n"
-            message += f"📊 *Score final:* {res['home_score']} - {res['away_score']}\n"
-            message += f"🎯 *Prédiction:* {pred['prediction_type']} - {pred['prediction']} (Cote: {pred['odds']})\n"
-            
-            if is_winner:
-                message += "✅ *CORRECT*\n\n"
-            else:
-                message += "❌ *INCORRECT*\n\n"
-        
-        message += f"*📈 COTE TOTALE DU COUPON: {self.coupon_total_odds}*\n\n"
-        
-        if coupon_is_winner:
-            message += "🎉 *FÉLICITATIONS! TOUTES LES PRÉDICTIONS ÉTAIENT CORRECTES* 🎉"
-        else:
-            message += "😔 *DÉSOLÉ, CERTAINES PRÉDICTIONS ÉTAIENT INCORRECTES* 😔"
-        
-        return message
-    
-    def send_results_to_telegram(self, results, coupon_is_winner):
-        """Envoie les résultats sur le canal Telegram."""
-        message = self.format_results_message(results, coupon_is_winner)
-        
-        logger.info(f"Envoi des résultats sur Telegram (Coupon {'gagnant' if coupon_is_winner else 'perdant'})...")
-        success = self.send_to_telegram(message)
-        
-        if success:
-            logger.info("Résultats envoyés avec succès")
-        else:
-            logger.error("Échec de l'envoi des résultats")
-            
-        # Sauvegarder les résultats dans un fichier pour référence
-        self.save_results_to_file(results, coupon_is_winner)
-    
-    def save_results_to_file(self, results, coupon_is_winner):
-        """Sauvegarde les résultats dans un fichier pour référence."""
-        try:
-            data_to_save = {
-                "coupon_id": self.coupon_id,
-                "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                "is_winner": coupon_is_winner,
-                "results": {}
-            }
-            
-            # Formater les résultats pour la sauvegarde
-            for match_id, result_data in results.items():
-                pred = result_data["prediction"]
-                res = result_data["result"]
-                
-                data_to_save["results"][match_id] = {
-                    "home_team": pred["home_team"],
-                    "away_team": pred["away_team"],
-                    "league_name": pred["league_name"],
-                    "prediction_type": pred["prediction_type"],
-                    "prediction": pred["prediction"],
-                    "odds": pred["odds"],
-                    "score_home": res["home_score"],
-                    "score_away": res["away_score"],
-                    "is_winner": result_data["is_winner"]
-                }
-            
-            filename = f"results_{self.coupon_id}.json"
-            
-            with open(filename, 'w', encoding='utf-8') as f:
-                json.dump(data_to_save, f, indent=2, ensure_ascii=False)
-            
-            logger.info(f"Résultats sauvegardés dans {filename}")
-        except Exception as e:
-            logger.error(f"Erreur lors de la sauvegarde des résultats: {str(e)}")
 
 # Point d'entrée principal
 if __name__ == "__main__":
     try:
         bot = FootballPredictionBot()
-        bot.run()
+        bot.schedule_daily_job()
     except Exception as e:
         logger.critical(f"Erreur fatale: {str(e)}")
         # Afficher la trace complète de l'erreur pour faciliter le débogage
