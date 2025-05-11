@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 import requests
 import schedule
 import pytz
+import statistics
 
 # Configuration du logging
 logging.basicConfig(
@@ -17,7 +18,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger('prediction_bot')
 
-# Classe principale du bot
 class FootballPredictionBot:
     def __init__(self):
         """Initialisation du bot avec les configurations nécessaires."""
@@ -238,77 +238,13 @@ class FootballPredictionBot:
             return None
         
         return response.get("data", {})
-    
-    def is_handicap_king_applicable(self, markets):
-        """Vérifie si la stratégie 'Le Handicap du Roi' est applicable."""
-        if "1" not in markets or "16" not in markets:  # 1 = 1X2, 16 = Handicap
-            return False, None
-        
-        # Trouver la cote pour la victoire simple
-        victory_odds = None
-        for outcome in markets["1"].get("outcomes", []):
-            if outcome.get("name") == "1":  # Victoire domicile
-                victory_odds = outcome.get("odds")
-                break
-        
-        if not victory_odds or victory_odds > 1.90:
-            return False, None
-        
-        # Trouver la cote pour la victoire avec handicap -1
-        handicap_odds = None
-        for outcome in markets["16"].get("outcomes", []):
-            if "1" in outcome.get("name", "") and "-1" in outcome.get("name", ""):
-                handicap_odds = outcome.get("odds")
-                break
-        
-        if not handicap_odds:
-            return False, None
-        
-        # Calculer l'écart entre les deux cotes
-        odds_difference = handicap_odds - victory_odds
-        
-        # Vérifier si l'écart est dans la plage souhaitée (0.35-0.60)
-        if 0.35 <= odds_difference <= 0.60:
-            return True, {"type": "Handicap -1", "odds": handicap_odds}
-        
-        return False, None
-    
-    def is_first_half_goal_applicable(self, markets):
-        """Vérifie si la stratégie 'Le Premier Feu Sacré' est applicable."""
-        # Rechercher la cote pour +1.5 buts en première mi-temps
-        first_half_over = None
-        
-        # Parcourir différents marchés possibles pour trouver la cote
-        for market_id in markets:
-            market = markets[market_id]
-            if "first half" in market.get("name", "").lower() and "total" in market.get("name", "").lower():
-                for outcome in market.get("outcomes", []):
-                    if "over 1.5" in outcome.get("name", "").lower():
-                        first_half_over = outcome.get("odds")
-                        break
-        
-        if not first_half_over or first_half_over > 1.80:
-            return False, None
-        
-        # Trouver la cote pour +0.5 but en première mi-temps (cote généralement basse)
-        first_half_one_goal = None
-        for market_id in markets:
-            market = markets[market_id]
-            if "first half" in market.get("name", "").lower() and "total" in market.get("name", "").lower():
-                for outcome in market.get("outcomes", []):
-                    if "over 0.5" in outcome.get("name", "").lower():
-                        first_half_one_goal = outcome.get("odds")
-                        break
-        
-        if not first_half_one_goal:
-            return False, None
-        
-        return True, {"type": "+0.5 but 1ère mi-temps", "odds": first_half_one_goal}
-    
-    def is_trapped_draw_applicable(self, markets):
-        """Vérifie si la stratégie 'Le Nul Piégé' est applicable."""
+
+    def analyze_1x2_market(self, markets, home_team, away_team):
+        """Analyse le marché 1X2 pour déterminer les prédictions possibles."""
         if "1" not in markets:  # 1 = 1X2
-            return False, None
+            return []
+        
+        predictions = []
         
         # Récupérer les cotes 1X2
         home_odds = away_odds = draw_odds = None
@@ -321,171 +257,415 @@ class FootballPredictionBot:
                 draw_odds = outcome.get("odds")
         
         if not all([home_odds, away_odds, draw_odds]):
-            return False, None
+            return predictions
         
-        # Vérifier si la cote du match nul est <= 3.50
-        if draw_odds <= 3.50:
-            # Déterminer quelle équipe est favorite
-            if home_odds < away_odds:
-                return True, {"type": "1X", "odds": min(1.70, home_odds * 0.70)}  # Double chance domicile ou nul
-            else:
-                return True, {"type": "X2", "odds": min(1.70, away_odds * 0.70)}  # Double chance extérieur ou nul
+        # Calculer la probabilité implicite (sans la marge du bookmaker)
+        total_prob = 1/home_odds + 1/away_odds + 1/draw_odds
+        home_prob = (1/home_odds) / total_prob
+        away_prob = (1/away_odds) / total_prob
+        draw_prob = (1/draw_odds) / total_prob
         
-        return False, None
-    
-    def is_both_teams_to_score_applicable(self, markets):
-        """Vérifie si la stratégie 'Le Pacte des Deux Buteurs' est applicable."""
-        home_total_over = away_total_over = match_total_over = None
+        # Seuils de confiance pour différentes prédictions
+        home_threshold = 0.48  # Probabilité pour parier sur victoire domicile
+        away_threshold = 0.48  # Probabilité pour parier sur victoire extérieur
+        low_draw_threshold = 0.24  # Probabilité basse pour un match nul
         
-        # Rechercher les cotes pour les totaux
-        for market_id in markets:
-            market = markets[market_id]
-            # Recherche du total pour l'équipe à domicile
-            if "team 1" in market.get("name", "").lower() and "total" in market.get("name", "").lower():
-                for outcome in market.get("outcomes", []):
-                    if "over 1.5" in outcome.get("name", "").lower():
-                        home_total_over = outcome.get("odds")
-            
-            # Recherche du total pour l'équipe à l'extérieur
-            elif "team 2" in market.get("name", "").lower() and "total" in market.get("name", "").lower():
-                for outcome in market.get("outcomes", []):
-                    if "over 1.5" in outcome.get("name", "").lower():
-                        away_total_over = outcome.get("odds")
-            
-            # Recherche du total pour le match
-            elif "total" in market.get("name", "").lower() and not "team" in market.get("name", "").lower():
-                for outcome in market.get("outcomes", []):
-                    if "over 2.5" in outcome.get("name", "").lower():
-                        match_total_over = outcome.get("odds")
+        # Vérifier si une équipe est fortement favorite
+        if home_prob > home_threshold:
+            predictions.append({
+                "type": f"{home_team} gagne",
+                "odds": home_odds,
+                "confidence": home_prob,
+                "market": "1X2"
+            })
         
-        # Rechercher la cote pour "Les deux équipes marquent"
-        btts_odds = None
-        for market_id in markets:
-            market = markets[market_id]
+        if away_prob > away_threshold:
+            predictions.append({
+                "type": f"{away_team} gagne",
+                "odds": away_odds,
+                "confidence": away_prob,
+                "market": "1X2"
+            })
+        
+        # Proposer une double chance si le match semble déséquilibré
+        if home_prob > 0.38 and draw_prob > 0.25:
+            predictions.append({
+                "type": "1X",
+                "odds": round(1 / (home_prob + draw_prob), 2),
+                "confidence": home_prob + draw_prob,
+                "market": "Double Chance"
+            })
+        
+        if away_prob > 0.38 and draw_prob > 0.25:
+            predictions.append({
+                "type": "X2",
+                "odds": round(1 / (away_prob + draw_prob), 2),
+                "confidence": away_prob + draw_prob,
+                "market": "Double Chance"
+            })
+        
+        # Si le match nul a une faible probabilité, suggérer 12
+        if draw_prob < low_draw_threshold:
+            predictions.append({
+                "type": "12",
+                "odds": round(1 / (home_prob + away_prob), 2),
+                "confidence": home_prob + away_prob,
+                "market": "Double Chance"
+            })
+        
+        return predictions
+
+    def analyze_btts_market(self, markets):
+        """Analyse le marché 'Les deux équipes marquent' (Both Teams To Score)."""
+        predictions = []
+        
+        # Trouver le marché BTTS
+        btts_yes_odds = btts_no_odds = None
+        
+        for market_id, market in markets.items():
             if "both teams to score" in market.get("name", "").lower():
                 for outcome in market.get("outcomes", []):
                     if outcome.get("name", "").lower() in ["yes", "oui"]:
-                        btts_odds = outcome.get("odds")
+                        btts_yes_odds = outcome.get("odds")
+                    elif outcome.get("name", "").lower() in ["no", "non"]:
+                        btts_no_odds = outcome.get("odds")
         
-        # Vérifier les conditions pour appliquer la stratégie
-        if (home_total_over and home_total_over <= 2.00 and
-            away_total_over and away_total_over <= 2.20 and
-            match_total_over and match_total_over <= 1.70 and
-            btts_odds):
-            return True, {"type": "Les 2 équipes marquent", "odds": btts_odds}
+        if not btts_yes_odds or not btts_no_odds:
+            return predictions
         
-        return False, None
-    
-    def is_under_goals_applicable(self, markets):
-        """Vérifie si la stratégie pour parier sur moins de buts est applicable."""
-        # Rechercher les cotes pour les scores exacts
-        if "18" not in markets:  # 18 = Score exact
-            return False, None
+        # Calculer les probabilités implicites
+        total_prob = 1/btts_yes_odds + 1/btts_no_odds
+        yes_prob = (1/btts_yes_odds) / total_prob
+        no_prob = (1/btts_no_odds) / total_prob
         
-        scores = []
-        for outcome in markets["18"].get("outcomes", []):
-            scores.append({"name": outcome.get("name"), "odds": outcome.get("odds")})
+        # Vérifier si les cotes suggèrent clairement que les deux équipes vont marquer
+        if yes_prob > 0.58:
+            predictions.append({
+                "type": "Les 2 équipes marquent",
+                "odds": btts_yes_odds,
+                "confidence": yes_prob,
+                "market": "BTTS"
+            })
         
-        # Trier les scores par cote (du plus bas au plus haut)
-        scores.sort(key=lambda x: x["odds"])
+        # Ou si elles suggèrent qu'une seule équipe marquera
+        if no_prob > 0.58:
+            predictions.append({
+                "type": "Une seule/aucune équipe marque",
+                "odds": btts_no_odds,
+                "confidence": no_prob,
+                "market": "BTTS"
+            })
         
-        # Vérifier si les 3 cotes les plus basses sont toutes < 7.00
-        if len(scores) >= 3 and all(score["odds"] < 7.00 for score in scores[:3]):
-            # Rechercher la cote pour "Moins de 3,5 buts"
-            under_odds = None
-            for market_id in markets:
-                market = markets[market_id]
-                if "total" in market.get("name", "").lower():
-                    for outcome in market.get("outcomes", []):
-                        if "under 3.5" in outcome.get("name", "").lower():
-                            under_odds = outcome.get("odds")
-            
-            if under_odds:
-                return True, {"type": "-3.5 buts", "odds": under_odds}
-        
-        return False, None
-    
-    def determine_best_prediction(self, match_id, home_team, away_team, markets):
-        """Détermine la meilleure prédiction pour un match en fonction des stratégies."""
+        return predictions
+
+    def analyze_over_under_markets(self, markets):
+        """Analyse les marchés over/under pour les totaux de buts."""
         predictions = []
         
-        # Vérifier chaque stratégie
-        handicap_king, handicap_pred = self.is_handicap_king_applicable(markets)
-        if handicap_king:
+        # Capter les cotes pour différents totaux
+        over_under_data = {}
+        
+        for market_id, market in markets.items():
+            if "total" in market.get("name", "").lower() and not "team" in market.get("name", "").lower():
+                for outcome in market.get("outcomes", []):
+                    name = outcome.get("name", "").lower()
+                    odds = outcome.get("odds")
+                    
+                    if "over" in name or "under" in name:
+                        # Extraire le nombre de buts
+                        parts = name.split()
+                        for i, part in enumerate(parts):
+                            if part in ["over", "under"]:
+                                if i + 1 < len(parts) and parts[i+1].replace(".", "").isdigit():
+                                    total = float(parts[i+1])
+                                    direction = part
+                                    
+                                    if total not in over_under_data:
+                                        over_under_data[total] = {}
+                                    
+                                    over_under_data[total][direction] = odds
+        
+        # Analyser les données collectées
+        for total, odds in over_under_data.items():
+            if "over" in odds and "under" in odds:
+                # Calculer les probabilités implicites
+                over_odds = odds["over"]
+                under_odds = odds["under"]
+                
+                total_prob = 1/over_odds + 1/under_odds
+                over_prob = (1/over_odds) / total_prob
+                under_prob = (1/under_odds) / total_prob
+                
+                # Vérifier s'il y a une forte probabilité dans une direction
+                if total == 2.5 and over_prob > 0.57:
+                    predictions.append({
+                        "type": f"+2.5 buts",
+                        "odds": over_odds,
+                        "confidence": over_prob,
+                        "market": "Over/Under"
+                    })
+                elif total == 2.5 and under_prob > 0.57:
+                    predictions.append({
+                        "type": f"-2.5 buts",
+                        "odds": under_odds,
+                        "confidence": under_prob,
+                        "market": "Over/Under"
+                    })
+                elif total == 3.5 and under_prob > 0.56:
+                    predictions.append({
+                        "type": f"-3.5 buts",
+                        "odds": under_odds,
+                        "confidence": under_prob,
+                        "market": "Over/Under"
+                    })
+                elif total == 1.5 and over_prob > 0.65:
+                    predictions.append({
+                        "type": f"+1.5 buts",
+                        "odds": over_odds,
+                        "confidence": over_prob,
+                        "market": "Over/Under"
+                    })
+        
+        return predictions
+
+    def analyze_exact_scores(self, markets):
+        """Analyse les scores exacts pour déduire des tendances."""
+        if "18" not in markets:  # 18 = Score exact
+            return []
+        
+        predictions = []
+        scores = []
+        
+        # Récupérer tous les scores et leurs cotes
+        for outcome in markets["18"].get("outcomes", []):
+            score_name = outcome.get("name", "")
+            odds = outcome.get("odds")
+            
+            if "-" in score_name and odds:
+                scores.append({"name": score_name, "odds": odds})
+        
+        if not scores:
+            return predictions
+        
+        # Trier par cote croissante (les scores les plus probables d'abord)
+        scores.sort(key=lambda x: x["odds"])
+        
+        # Analyser les 5 scores les plus probables
+        top_scores = scores[:5]
+        
+        # Compter les buts totaux des scores les plus probables
+        total_goals = []
+        for score in top_scores:
+            try:
+                parts = score["name"].split("-")
+                home_goals = int(parts[0])
+                away_goals = int(parts[1])
+                total = home_goals + away_goals
+                total_goals.append(total)
+            except:
+                continue
+        
+        # Si les données sont suffisantes
+        # Si les données sont suffisantes
+        if total_goals:
+            avg_goals = sum(total_goals) / len(total_goals)
+            
+            # Si la moyenne des buts dans les scores probables est faible
+            if avg_goals < 2.2:
+                # Suggérer un pari sur moins de buts
+                predictions.append({
+                    "type": "-2.5 buts",
+                    "odds": None,  # À rechercher dans les marchés over/under
+                    "confidence": 0.65,
+                    "market": "Score Exact -> Over/Under"
+                })
+            elif avg_goals > 3.0:
+                # Suggérer un pari sur plus de buts
+                predictions.append({
+                    "type": "+2.5 buts",
+                    "odds": None,  # À rechercher dans les marchés over/under
+                    "confidence": 0.65,
+                    "market": "Score Exact -> Over/Under"
+                })
+            
+            # Vérifier si les deux équipes marquent dans la majorité des scores probables
+            btts_count = 0
+            for score in top_scores:
+                try:
+                    parts = score["name"].split("-")
+                    home_goals = int(parts[0])
+                    away_goals = int(parts[1])
+                    if home_goals > 0 and away_goals > 0:
+                        btts_count += 1
+                except:
+                    continue
+            
+            if btts_count >= 3:  # Au moins 3 des 5 scores probables impliquent BTTS
+                predictions.append({
+                    "type": "Les 2 équipes marquent",
+                    "odds": None,  # À rechercher dans le marché BTTS
+                    "confidence": 0.6,
+                    "market": "Score Exact -> BTTS"
+                })
+        
+        return predictions
+
+    def analyze_home_away_dominance(self, markets, home_team, away_team):
+        """Analyse si une équipe est particulièrement dominante selon diverses statistiques."""
+        predictions = []
+        
+        # Vérifier les cotes handicap
+        handicap_advantage = None
+        
+        if "16" in markets:  # 16 = Handicap
+            for outcome in markets["16"].get("outcomes", []):
+                name = outcome.get("name", "")
+                odds = outcome.get("odds")
+                
+                # Chercher un handicap -1 avec une cote raisonnable
+                if "1 (-1)" in name and odds < 2.50:
+                    handicap_advantage = "home"
+                elif "2 (-1)" in name and odds < 2.50:
+                    handicap_advantage = "away"
+        
+        # Vérifier les cotes de victoire à zéro
+        win_to_nil_advantage = None
+        
+        for market_id, market in markets.items():
+            if "win to nil" in market.get("name", "").lower():
+                for outcome in market.get("outcomes", []):
+                    name = outcome.get("name", "").lower()
+                    odds = outcome.get("odds")
+                    
+                    if "1" in name and odds < 3.20:
+                        win_to_nil_advantage = "home"
+                    elif "2" in name and odds < 3.20:
+                        win_to_nil_advantage = "away"
+        
+        # Si plusieurs indicateurs convergent vers la même équipe
+        if handicap_advantage == "home" and win_to_nil_advantage == "home":
             predictions.append({
-                "strategy": "Le Handicap du Roi",
-                "prediction": f"{home_team} gagne",
-                "type": handicap_pred["type"],
-                "odds": handicap_pred["odds"],
-                "confidence": 0.85
+                "type": f"{home_team} gagne",
+                "odds": None,  # À rechercher dans le marché 1X2
+                "confidence": 0.70,
+                "market": "Dominance Équipe"
+            })
+        elif handicap_advantage == "away" and win_to_nil_advantage == "away":
+            predictions.append({
+                "type": f"{away_team} gagne",
+                "odds": None,  # À rechercher dans le marché 1X2
+                "confidence": 0.70,
+                "market": "Dominance Équipe"
             })
         
-        first_half_goal, first_half_pred = self.is_first_half_goal_applicable(markets)
-        if first_half_goal:
-            predictions.append({
-                "strategy": "Le Premier Feu Sacré",
-                "prediction": first_half_pred["type"],
-                "type": first_half_pred["type"],
-                "odds": first_half_pred["odds"],
-                "confidence": 0.80
-            })
-        
-        trapped_draw, draw_pred = self.is_trapped_draw_applicable(markets)
-        if trapped_draw:
-            predictions.append({
-                "strategy": "Le Nul Piégé",
-                "prediction": draw_pred["type"],
-                "type": draw_pred["type"],
-                "odds": draw_pred["odds"],
-                "confidence": 0.75
-            })
-        
-        btts, btts_pred = self.is_both_teams_to_score_applicable(markets)
-        if btts:
-            predictions.append({
-                "strategy": "Le Pacte des Deux Buteurs",
-                "prediction": btts_pred["type"],
-                "type": btts_pred["type"],
-                "odds": btts_pred["odds"],
-                "confidence": 0.78
-            })
-        
-        under_goals, under_pred = self.is_under_goals_applicable(markets)
-        if under_goals:
-            predictions.append({
-                "strategy": "Le Poids des Petites Cotes",
-                "prediction": under_pred["type"],
-                "type": under_pred["type"],
-                "odds": under_pred["odds"],
-                "confidence": 0.82
-            })
-        
-        # Si aucune prédiction n'est applicable, retourner None
-        if not predictions:
+        return predictions
+
+    def find_best_prediction(self, all_predictions, markets):
+        """Trouve la meilleure prédiction parmi toutes les possibilités, en s'assurant d'avoir les cotes."""
+        if not all_predictions:
             return None
         
-        # Trier les prédictions par niveau de confiance (du plus élevé au plus bas)
-        predictions.sort(key=lambda x: x["confidence"], reverse=True)
+        # Trier par niveau de confiance
+        all_predictions.sort(key=lambda x: x["confidence"], reverse=True)
         
-        # Retourner la prédiction avec le niveau de confiance le plus élevé
-        best_prediction = predictions[0]
+        # Vérifier et compléter les cotes manquantes
+        for pred in all_predictions:
+            if not pred["odds"]:
+                if pred["type"] == "+2.5 buts":
+                    for market_id, market in markets.items():
+                        if "total" in market.get("name", "").lower():
+                            for outcome in market.get("outcomes", []):
+                                if "over 2.5" in outcome.get("name", "").lower():
+                                    pred["odds"] = outcome.get("odds")
+                
+                elif pred["type"] == "-2.5 buts":
+                    for market_id, market in markets.items():
+                        if "total" in market.get("name", "").lower():
+                            for outcome in market.get("outcomes", []):
+                                if "under 2.5" in outcome.get("name", "").lower():
+                                    pred["odds"] = outcome.get("odds")
+                
+                elif pred["type"] == "-3.5 buts":
+                    for market_id, market in markets.items():
+                        if "total" in market.get("name", "").lower():
+                            for outcome in market.get("outcomes", []):
+                                if "under 3.5" in outcome.get("name", "").lower():
+                                    pred["odds"] = outcome.get("odds")
+                
+                elif pred["type"] == "+1.5 buts":
+                    for market_id, market in markets.items():
+                        if "total" in market.get("name", "").lower():
+                            for outcome in market.get("outcomes", []):
+                                if "over 1.5" in outcome.get("name", "").lower():
+                                    pred["odds"] = outcome.get("odds")
+                
+                elif pred["type"] == "Les 2 équipes marquent":
+                    for market_id, market in markets.items():
+                        if "both teams to score" in market.get("name", "").lower():
+                            for outcome in market.get("outcomes", []):
+                                if outcome.get("name", "").lower() in ["yes", "oui"]:
+                                    pred["odds"] = outcome.get("odds")
+                
+                elif "gagne" in pred["type"]:
+                    team = pred["type"].split(" gagne")[0]
+                    for outcome in markets.get("1", {}).get("outcomes", []):
+                        if (outcome.get("name") == "1" and team == pred["home_team"]) or \
+                           (outcome.get("name") == "2" and team == pred["away_team"]):
+                            pred["odds"] = outcome.get("odds")
+                
+                elif pred["type"] in ["1X", "X2", "12"]:
+                    for market_id, market in markets.items():
+                        if "double chance" in market.get("name", "").lower():
+                            for outcome in market.get("outcomes", []):
+                                if outcome.get("name") == pred["type"]:
+                                    pred["odds"] = outcome.get("odds")
         
-        return {
-            "match_id": match_id,
-            "home_team": home_team,
-            "away_team": away_team,
-            "prediction": best_prediction["prediction"],
-            "type": best_prediction["type"],
-            "odds": best_prediction["odds"],
-            "strategy": best_prediction["strategy"],
-            "confidence": best_prediction["confidence"]
-        }
+        # Filtrer les prédictions sans cote
+        valid_predictions = [p for p in all_predictions if p["odds"]]
+        
+        if not valid_predictions:
+            # Fallback: créer une prédiction par défaut avec le marché 1X2
+            if "1" in markets:
+                # Trouver l'option avec la cote la plus basse (la plus probable)
+                min_odds = float('inf')
+                best_outcome = None
+                
+                for outcome in markets["1"].get("outcomes", []):
+                    odds = outcome.get("odds")
+                    if odds and odds < min_odds:
+                        min_odds = odds
+                        best_outcome = outcome.get("name")
+                
+                if best_outcome == "1":
+                    return {
+                        "type": f"{pred.get('home_team')} gagne",
+                        "odds": min_odds,
+                        "confidence": 0.55,
+                        "market": "1X2 (Fallback)"
+                    }
+                elif best_outcome == "2":
+                    return {
+                        "type": f"{pred.get('away_team')} gagne",
+                        "odds": min_odds,
+                        "confidence": 0.55,
+                        "market": "1X2 (Fallback)"
+                    }
+                elif best_outcome == "X":
+                    return {
+                        "type": "Match nul",
+                        "odds": min_odds,
+                        "confidence": 0.55,
+                        "market": "1X2 (Fallback)"
+                    }
+            
+            return None
+        
+        # Retourner la prédiction avec la meilleure confiance
+        return valid_predictions[0]
     
     def generate_predictions(self):
         """Génère les meilleures prédictions pour les matchs sélectionnés."""
         logger.info("=== GÉNÉRATION DES PRÉDICTIONS ===")
-        
-        valid_predictions = 0
         
         for match in self.selected_matches:
             match_id = match.get("id")
@@ -502,22 +682,115 @@ class FootballPredictionBot:
                 logger.warning(f"Pas de cotes disponibles pour {home_team} vs {away_team}, match ignoré")
                 continue
             
-            # Déterminer la meilleure prédiction pour ce match
-            best_prediction = self.determine_best_prediction(match_id, home_team, away_team, markets)
+            # Analyser tous les marchés et collecter les prédictions possibles
+            all_predictions = []
+            
+            # Ajouter les informations d'équipe à toutes les prédictions
+            match_info = {
+                "home_team": home_team,
+                "away_team": away_team
+            }
+            
+            # Analyser le marché 1X2
+            predictions_1x2 = self.analyze_1x2_market(markets, home_team, away_team)
+            for p in predictions_1x2:
+                p.update(match_info)
+                all_predictions.append(p)
+            
+            # Analyser le marché BTTS
+            predictions_btts = self.analyze_btts_market(markets)
+            for p in predictions_btts:
+                p.update(match_info)
+                all_predictions.append(p)
+            
+            # Analyser les marchés over/under
+            predictions_ou = self.analyze_over_under_markets(markets)
+            for p in predictions_ou:
+                p.update(match_info)
+                all_predictions.append(p)
+            
+            # Analyser les scores exacts
+            predictions_scores = self.analyze_exact_scores(markets)
+            for p in predictions_scores:
+                p.update(match_info)
+                all_predictions.append(p)
+            
+            # Analyser la dominance d'équipe
+            predictions_dominance = self.analyze_home_away_dominance(markets, home_team, away_team)
+            for p in predictions_dominance:
+                p.update(match_info)
+                all_predictions.append(p)
+            
+            # Trouver la meilleure prédiction
+            best_prediction = self.find_best_prediction(all_predictions, markets)
             
             if best_prediction:
                 # Ajouter les informations supplémentaires
+                best_prediction["match_id"] = match_id
                 best_prediction["league_name"] = league_name
                 best_prediction["start_timestamp"] = match.get("start_timestamp", 0)
                 
                 # Stocker la prédiction
                 self.predictions[match_id] = best_prediction
-                valid_predictions += 1
                 
-                logger.info(f"  Prédiction pour {home_team} vs {away_team}: {best_prediction['prediction']} (Cote: {best_prediction['odds']})")
-                logger.info(f"  Stratégie utilisée: {best_prediction['strategy']}")
+                logger.info(f"  Prédiction pour {home_team} vs {away_team}: {best_prediction['type']} (Cote: {best_prediction['odds']})")
+                logger.info(f"  Confiance: {best_prediction['confidence']:.2f}, Marché: {best_prediction['market']}")
             else:
-                logger.warning(f"Aucune prédiction fiable trouvée pour {home_team} vs {away_team}")
+                # Fallback: Créer une prédiction basée sur le favori du match
+                if "1" in markets:
+                    home_odds = away_odds = draw_odds = None
+                    for outcome in markets["1"].get("outcomes", []):
+                        if outcome.get("name") == "1":
+                            home_odds = outcome.get("odds")
+                        elif outcome.get("name") == "2":
+                            away_odds = outcome.get("odds")
+                        elif outcome.get("name") == "X":
+                            draw_odds = outcome.get("odds")
+                    
+                    if home_odds and away_odds:
+                        if home_odds <= away_odds:
+                            fallback_pred = {
+                                "match_id": match_id,
+                                "home_team": home_team,
+                                "away_team": away_team,
+                                "league_name": league_name,
+                                "start_timestamp": match.get("start_timestamp", 0),
+                                "type": "1X",
+                                "odds": 1.4,  # Valeur par défaut, à remplacer
+                                "confidence": 0.6,
+                                "market": "Double Chance (Fallback)"
+                            }
+                            
+                            # Chercher la cote réelle
+                            for market_id, market in markets.items():
+                                if "double chance" in market.get("name", "").lower():
+                                    for outcome in market.get("outcomes", []):
+                                        if outcome.get("name") == "1X":
+                                            fallback_pred["odds"] = outcome.get("odds")
+                        else:
+                            fallback_pred = {
+                                "match_id": match_id,
+                                "home_team": home_team,
+                                "away_team": away_team,
+                                "league_name": league_name,
+                                "start_timestamp": match.get("start_timestamp", 0),
+                                "type": "X2",
+                                "odds": 1.4,  # Valeur par défaut, à remplacer
+                                "confidence": 0.6,
+                                "market": "Double Chance (Fallback)"
+                            }
+                            
+                            # Chercher la cote réelle
+                            for market_id, market in markets.items():
+                                if "double chance" in market.get("name", "").lower():
+                                    for outcome in market.get("outcomes", []):
+                                        if outcome.get("name") == "X2":
+                                            fallback_pred["odds"] = outcome.get("odds")
+                        
+                        self.predictions[match_id] = fallback_pred
+                        logger.info(f"  Prédiction de secours pour {home_team} vs {away_team}: {fallback_pred['type']} (Cote: {fallback_pred['odds']})")
+                else:
+                    logger.warning(f"Impossible de générer une prédiction pour {home_team} vs {away_team}")
         
         # Calculer la cote totale du coupon
         if self.predictions:
@@ -526,7 +799,7 @@ class FootballPredictionBot:
                 self.coupon_total_odds *= pred["odds"]
             self.coupon_total_odds = round(self.coupon_total_odds, 2)
         
-        logger.info(f"Prédictions générées pour {valid_predictions} match(s) avec une cote totale de {self.coupon_total_odds}")
+        logger.info(f"Prédictions générées pour {len(self.predictions)} match(s) avec une cote totale de {self.coupon_total_odds}")
     
     def format_prediction_message(self):
         """Formate le message de prédiction pour Telegram."""
@@ -552,7 +825,7 @@ class FootballPredictionBot:
             
             message += f"🏆 *{pred['league_name'].upper()}*\n"
             message += f"⚽ *{pred['home_team']} vs {pred['away_team']}* | {start_time}\n"
-            message += f"🎯 *Prédiction:* {pred['prediction']}\n"
+            message += f"🎯 *Prédiction:* {pred['type']}\n"
             message += f"💰 *Cote:* {pred['odds']}\n\n"
         
         # Ajouter la cote totale
