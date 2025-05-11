@@ -135,8 +135,8 @@ class FootballPredictionBot:
         """Récupère les matchs du jour."""
         # Définir la plage horaire pour les matchs (aujourd'hui)
         now = datetime.now(self.timezone)
-        today_start = datetime(now.year, now.month, now.day, 0, 0, 0, tzinfo=self.timezone)
-        today_end = datetime(now.year, now.month, now.day, 23, 59, 59, tzinfo=self.timezone)
+        today_start = datetime(now.year, now.month, now.day, 0, 0, 0).replace(tzinfo=self.timezone)
+        today_end = datetime(now.year, now.month, now.day, 23, 59, 59).replace(tzinfo=self.timezone)
         
         start_timestamp = int(today_start.timestamp())
         end_timestamp = int(today_end.timestamp())
