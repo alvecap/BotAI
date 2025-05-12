@@ -6,8 +6,8 @@ import time
 import logging
 from datetime import datetime, timedelta
 import requests
-import schedule
 import pytz
+import schedule
 
 # Configuration du logging
 logging.basicConfig(
@@ -45,6 +45,9 @@ class FootballPredictionBot:
         
         # Cote minimale pour les prédictions
         self.min_odds = 1.10
+        
+        # Liste des IDs de ligue connus qui fonctionnent
+        self.league_ids = [1, 118, 148, 127, 110, 136, 251, 252, 253]
     
     def _check_env_variables(self):
         """Vérifie que toutes les variables d'environnement requises sont définies."""
@@ -139,9 +142,12 @@ class FootballPredictionBot:
         return None
     
     def get_todays_matches(self):
-        """Récupère les matchs du jour en utilisant les endpoints disponibles."""
-        # Définir la plage horaire pour les matchs (aujourd'hui)
+        """Récupère les matchs du jour en utilisant les IDs de ligue connus."""
+        # Obtenir l'heure actuelle
         now = datetime.now(self.timezone)
+        now_timestamp = int(now.timestamp())
+        
+        # Définir la plage horaire pour les matchs (aujourd'hui)
         today_start = datetime(now.year, now.month, now.day, 0, 0, 0).replace(tzinfo=self.timezone)
         today_end = datetime(now.year, now.month, now.day, 23, 59, 59).replace(tzinfo=self.timezone)
         
@@ -153,79 +159,56 @@ class FootballPredictionBot:
         # Liste pour stocker tous les matchs trouvés
         all_matches = []
         
-        # Championnats populaires à consulter
-        leagues_to_check = [
-            {"id": 148, "name": "Ligue 1"},        # France
-            {"id": 110, "name": "Serie A"},        # Italie
-            {"id": 127, "name": "La Liga"},        # Espagne
-            {"id": 136, "name": "Bundesliga"},     # Allemagne
-            {"id": 118, "name": "Premier League"}, # Angleterre
-            {"id": 251, "name": "UEFA Champions League"},
-            {"id": 252, "name": "UEFA Europa League"},
-            {"id": 253, "name": "UEFA Conference League"},
-            {"id": 246, "name": "Japanese J League"},
-            {"id": 247, "name": "Korean K League"},
-            {"id": 248, "name": "Chinese Super League"},
-            {"id": 88, "name": "MLS"},             # USA
-            {"id": 98, "name": "Brazilian Serie A"},
-            {"id": 100, "name": "Argentine Primera División"}
-        ]
-        
-        for league in leagues_to_check:
-            league_id = league["id"]
-            league_name = league["name"]
+        # Parcourir tous les IDs de ligue connus
+        for league_id in self.league_ids:
+            logger.info(f"Recherche de matchs pour league_id={league_id}...")
             
-            logger.info(f"Recherche dans {league_name} (ID: {league_id})...")
-            
-            # Utilisation du paramètre sport_id=1 pour le football
+            # Récupérer les matchs de cette ligue
             endpoint = f"/matches?sport_id=1&league_id={league_id}&mode=line&lng=en"
             response = self.make_api_request(endpoint)
             
             if not response or response.get("status") != "success":
-                logger.warning(f"Aucun match trouvé dans {league_name}")
+                logger.warning(f"Aucun match trouvé pour league_id={league_id}")
                 continue
             
-            matches = response.get("data", {})
+            # Récupérer la liste des matchs
+            matches = response.get("data", [])
             
-            # Filtrer les matchs qui se déroulent aujourd'hui
+            # Vérifier si matches est une liste
+            if not isinstance(matches, list):
+                logger.warning(f"Format de données inattendu pour league_id={league_id}")
+                continue
+            
+            # Filtrer les matchs qui se déroulent aujourd'hui et qui ne sont pas encore commencés
             league_matches_count = 0
-            
-            # Vérification si data est un dictionnaire ou une liste
-            if isinstance(matches, dict):
-                # C'est un dictionnaire avec des clés comme IDs
-                for match_id, match in matches.items():
-                    match_timestamp = match.get("start_timestamp", 0)
-                    
-                    if start_timestamp <= match_timestamp <= end_timestamp:
-                        # Ajouter le nom de la ligue et l'ID du match aux informations
-                        match["id"] = match_id
-                        match["league_name"] = league_name
-                        match["league_id"] = league_id
-                        all_matches.append(match)
-                        league_matches_count += 1
-            elif isinstance(matches, list):
-                # C'est une liste de matchs
-                for match in matches:
-                    match_timestamp = match.get("start_timestamp", 0)
-                    
-                    if start_timestamp <= match_timestamp <= end_timestamp:
-                        # Ajouter le nom de la ligue aux informations du match
-                        match["league_name"] = league_name
-                        match["league_id"] = league_id
-                        all_matches.append(match)
-                        league_matches_count += 1
+            for match in matches:
+                match_timestamp = match.get("start_timestamp", 0)
+                
+                # Vérifier si le match se déroule aujourd'hui
+                if start_timestamp <= match_timestamp <= end_timestamp:
+                    # Vérifier que le match n'a pas encore commencé
+                    if match_timestamp > now_timestamp:
+                        # Vérifier que toutes les informations nécessaires sont présentes
+                        if (match.get("home_team") and 
+                            match.get("away_team") and 
+                            match.get("league") and 
+                            match.get("id")):
+                            
+                            # Ajouter le match à notre liste
+                            all_matches.append(match)
+                            league_matches_count += 1
             
             if league_matches_count > 0:
-                logger.info(f"Trouvé {league_matches_count} match(s) pour aujourd'hui dans {league_name}")
+                logger.info(f"Trouvé {league_matches_count} match(s) à venir pour aujourd'hui dans league_id={league_id}")
             
             # Attendre un court moment entre les requêtes pour éviter les limites d'API
             time.sleep(0.5)
         
-        logger.info(f"Total des matchs trouvés pour aujourd'hui: {len(all_matches)}")
+        logger.info(f"Total des matchs à venir trouvés pour aujourd'hui: {len(all_matches)}")
         return all_matches
     
     def select_matches(self, all_matches):
-        """Sélectionne jusqu'à 5 matchs parmi les matchs du jour."""
+        """Sélectionne jusqu'à 5 matchs parmi les matchs disponibles."""
         if not all_matches:
             logger.warning("Aucun match disponible pour la sélection.")
             return
@@ -246,7 +229,7 @@ class FootballPredictionBot:
             start_time = datetime.fromtimestamp(start_timestamp, self.timezone)
             home_team = match.get("home_team", "Équipe inconnue")
             away_team = match.get("away_team", "Équipe inconnue")
-            league_name = match.get("league_name", "Ligue inconnue")
+            league_name = match.get("league", "Ligue inconnue")  # Nom de la ligue comme chaîne de texte
             
             logger.info(f"Match {i+1}: {home_team} vs {away_team} - {league_name}")
             logger.info(f"  ID: {match.get('id')}")
@@ -425,7 +408,7 @@ class FootballPredictionBot:
             match_id = match.get("id")
             home_team = match.get("home_team", "Équipe domicile")
             away_team = match.get("away_team", "Équipe extérieur")
-            league_name = match.get("league_name", "Ligue inconnue")
+            league_name = match.get("league", "Ligue inconnue")  # Nom de la ligue comme chaîne de texte
             
             logger.info(f"Analyse du match {home_team} vs {away_team} (ID: {match_id})...")
             
@@ -460,7 +443,7 @@ class FootballPredictionBot:
                 prediction["match_id"] = match_id
                 prediction["home_team"] = home_team
                 prediction["away_team"] = away_team
-                prediction["league_name"] = league_name
+                prediction["league_name"] = league_name  # Nom de la ligue comme chaîne de texte
                 prediction["start_timestamp"] = match.get("start_timestamp", 0)
                 
                 # Stocker la prédiction
