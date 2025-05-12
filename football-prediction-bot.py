@@ -837,47 +837,52 @@ class FootballPredictionBot:
         logger.info(f"Prédictions générées pour {len(self.predictions)} match(s) avec une cote totale de {self.coupon_total_odds}")
     
     def format_prediction_message(self):
-        """Formate le message de prédiction pour Telegram avec mise en forme Markdown améliorée."""
-        now = datetime.now(self.timezone)
-        date_str = now.strftime("%d/%m/%Y")
-        
-        # Titre en gras avec émojis
-        message = "🔮 *COUPON DU JOUR* 🔮\n"
-        message += f"📅 *{date_str}*\n\n"
-        
-        # Si aucune prédiction n'a été générée
-        if not self.predictions:
-            message += "_Aucune prédiction fiable n'a pu être générée pour aujourd'hui. Revenez demain!_"
-            return message
-        
-        # Ajouter chaque prédiction au message
-        for i, (match_id, pred) in enumerate(self.predictions.items()):
-            # Séparateur
-            if i > 0:
-                message += "----------------------------\n\n"
-            
-            # Calculer l'heure du match au format local
-            start_time = datetime.fromtimestamp(pred["start_timestamp"], self.timezone).strftime("%H:%M")
-            
-            # Nom de la ligue en gras
-            message += f"🏆 *{pred['league_name'].upper()}*\n"
-            
-            # Équipes et heure du match
-            message += f"⚽️ *{pred['home_team']} vs {pred['away_team']}* | _{start_time}_\n"
-            
-            # Prédiction en gras
-            message += f"🎯 Prédiction: *{pred['type']}*\n"
-            
-            # Cote en italique
-            message += f"💰 Cote: _{pred['odds']}_\n"
-        
-        # Ajouter la cote totale et conseils en gras
-        message += f"----------------------------\n\n"
-        message += f"📊 *COTE TOTALE: {self.coupon_total_odds}*\n\n"
-        message += f"💡 *Misez toujours 5% de votre capital*\n"
-        message += f"🔞 *Pariez de façon responsable.*"
-        
+    """Formate le message de prédiction pour Telegram avec mise en forme Markdown améliorée."""
+    now = datetime.now(self.timezone)
+    date_str = now.strftime("%d/%m/%Y")
+    
+    # Titre en gras avec émojis
+    message = "🔮 *COUPON DU JOUR* 🔮\n"
+    message += f"📅 *{date_str}*\n\n"
+    
+    # Si aucune prédiction n'a été générée
+    if not self.predictions:
+        message += "_Aucune prédiction fiable n'a pu être générée pour aujourd'hui. Revenez demain!_"
         return message
+    
+    # Ajouter chaque prédiction au message
+    for i, (match_id, pred) in enumerate(self.predictions.items()):
+        # Séparateur
+        if i > 0:
+            message += "----------------------------\n\n"
+        
+        # Calculer l'heure du match au format local
+        start_time = datetime.fromtimestamp(pred["start_timestamp"], self.timezone).strftime("%H:%M")
+        
+        # Nom de la ligue en MAJUSCULES
+        message += f"🏆 *{pred['league_name'].upper()}*\n"
+        
+        # Équipes sur une ligne
+        message += f"⚽️ *{pred['home_team']} vs {pred['away_team']}*\n"
+        
+        # Heure sur une nouvelle ligne
+        message += f"⏰ Heure: {start_time}\n"
+        
+        # Prédiction en gras et plus visible
+        message += f"🎯 *PRÉDICTION: {pred['type']}*\n"
+        
+        # Cote
+        message += f"💰 Cote: {pred['odds']}\n"
+    
+    # Ajouter la cote totale en gras
+    message += f"----------------------------\n\n"
+    message += f"📊 *COTE TOTALE: {self.coupon_total_odds}*\n\n"
+    
+    # Conseils en italique
+    message += f"💡 _Misez toujours 5% de votre capital_\n"
+    message += f"🔞 _Pariez de façon responsable._"
+    
+    return message
     
     def send_to_telegram(self, message):
         """Envoie un message sur le canal Telegram."""
