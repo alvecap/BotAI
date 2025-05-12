@@ -48,6 +48,9 @@ class FootballPredictionBot:
         self.min_odds = 1.15  # Cote minimale pour les prédictions
         self.max_odds = 10.0  # Cote maximale pour éviter les paris trop risqués
         
+        # Seuil pour considérer une cote comme "élevée" pour les doubles chances
+        self.high_odds_threshold = 2.5
+        
         # Catégorisation des championnats par niveau de scoring
         self.low_scoring_leagues = [
             "ghana", "nigeria", "kenya", "tanzania", "ethiopia", "south africa", 
@@ -64,11 +67,13 @@ class FootballPredictionBot:
         # Liste des IDs de ligue connus qui fonctionnent avec l'API
         self.league_ids = [1, 118, 148, 127, 110, 136, 251, 252, 253, 301, 302, 303, 304]
         
-        # Types de prédictions à considérer
+        # Types de prédictions à considérer - UNIQUEMENT ceux demandés
         self.prediction_types = [
-            "under_25_goals", "under_35_goals", "under_45_goals",
-            "over_05_goals", "over_15_goals", "over_25_goals",
-            "btts_yes", "btts_no", "double_chance_1X", "double_chance_X2", "double_chance_12"
+            "under_35_goals",  # -3.5 buts
+            "under_45_goals",  # -4.5 buts
+            "over_15_goals",   # +1.5 buts
+            "double_chance_1X", # 1X
+            "double_chance_X2"  # X2
         ]
         
         # Configuration des poids pour les calculs de confiance
@@ -80,17 +85,11 @@ class FootballPredictionBot:
         
         # Coefficients de confiance de base pour chaque type de prédiction
         self.base_confidence = {
-            "under_25_goals": 0.75,
             "under_35_goals": 0.80,
             "under_45_goals": 0.85,
-            "over_05_goals": 0.90,
             "over_15_goals": 0.75,
-            "over_25_goals": 0.65,
-            "btts_yes": 0.70,
-            "btts_no": 0.70,
             "double_chance_1X": 0.85,
-            "double_chance_X2": 0.80,
-            "double_chance_12": 0.75
+            "double_chance_X2": 0.80
         }
     
     def _check_env_variables(self):
@@ -363,48 +362,38 @@ class FootballPredictionBot:
         
         return response.get("data", {})
 
-    # ============= MODÈLES DE CALCUL AVANCÉS POUR CHAQUE TYPE DE PRÉDICTION =============
-    
-    def find_under_25_goals(self, markets):
-        """Modèle de calcul pour la prédiction Under 2.5 buts."""
-        result = {
-            "type": "-2.5 buts",
-            "odds": None,
-            "confidence": 0,
-            "stability": 0
-        }
+    def get_teams_basic_odds(self, markets):
+        """Récupère les cotes de base 1X2 pour les équipes."""
+        home_odds = None
+        draw_odds = None
+        away_odds = None
         
-        # Rechercher le marché Total (Under 2.5)
+        # Rechercher le marché 1X2
         for market_id, market in markets.items():
             market_name = market.get("name", "").lower()
             
-            if "total" in market_name and not "team" in market_name:
+            if market_name == "1x2" or market_name == "match result":
                 for outcome in market.get("outcomes", []):
                     name = outcome.get("name", "").lower()
                     odds = outcome.get("odds")
                     
-                    if "under" in name and "2.5" in name and odds:
-                        if self.min_odds <= odds <= self.max_odds:
-                            result["odds"] = odds
-                            
-                            # Calculer la confiance basée sur les cotes
-                            # Plus les cotes sont basses, plus la confiance est élevée
-                            odds_confidence = 1.0 - ((odds - self.min_odds) / (self.max_odds - self.min_odds))
-                            odds_confidence = max(0.5, min(0.95, odds_confidence))
-                            
-                            # La stabilité dépend de l'écart avec les cotes moyennes pour ce type de pari
-                            # (ici on simule une valeur, mais en production on comparerait avec des moyennes historiques)
-                            avg_under_25_odds = 1.85  # Cote moyenne fictive pour under 2.5
-                            stability = 1.0 - min(1.0, abs(odds - avg_under_25_odds) / avg_under_25_odds)
-                            result["stability"] = stability
-                            
-                            # Stocker les cotes et la confiance brute
-                            result["odds"] = odds
-                            result["raw_confidence"] = odds_confidence
-                            return result
+                    if ("home" in name or "1" == name) and odds:
+                        home_odds = odds
+                    elif ("draw" in name or "x" == name) and odds:
+                        draw_odds = odds
+                    elif ("away" in name or "2" == name) and odds:
+                        away_odds = odds
+                
+                break
         
-        return None
+        return {
+            "home": home_odds,
+            "draw": draw_odds,
+            "away": away_odds
+        }
 
+    # ============= MODÈLES DE CALCUL AVANCÉS POUR CHAQUE TYPE DE PRÉDICTION =============
+    
     def find_under_35_goals(self, markets):
         """Modèle de calcul pour la prédiction Under 3.5 buts."""
         result = {
@@ -475,41 +464,6 @@ class FootballPredictionBot:
         
         return None
 
-    def find_over_05_goals(self, markets):
-        """Modèle de calcul pour la prédiction Over 0.5 buts."""
-        result = {
-            "type": "+0.5 buts",
-            "odds": None,
-            "confidence": 0,
-            "stability": 0
-        }
-        
-        for market_id, market in markets.items():
-            market_name = market.get("name", "").lower()
-            
-            if "total" in market_name and not "team" in market_name:
-                for outcome in market.get("outcomes", []):
-                    name = outcome.get("name", "").lower()
-                    odds = outcome.get("odds")
-                    
-                    if "over" in name and "0.5" in name and odds:
-                        if self.min_odds <= odds <= self.max_odds:
-                            # Calculer la confiance basée sur les cotes
-                            odds_confidence = 1.0 - ((odds - self.min_odds) / (self.max_odds - self.min_odds))
-                            odds_confidence = max(0.7, min(0.98, odds_confidence))
-                            
-                            # Calculer la stabilité
-                            avg_over_05_odds = 1.20  # Cote moyenne fictive pour over 0.5
-                            stability = 1.0 - min(1.0, abs(odds - avg_over_05_odds) / avg_over_05_odds)
-                            result["stability"] = stability
-                            
-                            # Stocker les cotes et la confiance brute
-                            result["odds"] = odds
-                            result["raw_confidence"] = odds_confidence
-                            return result
-        
-        return None
-
     def find_over_15_goals(self, markets):
         """Modèle de calcul pour la prédiction Over 1.5 buts."""
         result = {
@@ -545,113 +499,12 @@ class FootballPredictionBot:
         
         return None
 
-    def find_over_25_goals(self, markets):
-        """Modèle de calcul pour la prédiction Over 2.5 buts."""
-        result = {
-            "type": "+2.5 buts",
-            "odds": None,
-            "confidence": 0,
-            "stability": 0
-        }
-        
-        for market_id, market in markets.items():
-            market_name = market.get("name", "").lower()
-            
-            if "total" in market_name and not "team" in market_name:
-                for outcome in market.get("outcomes", []):
-                    name = outcome.get("name", "").lower()
-                    odds = outcome.get("odds")
-                    
-                    if "over" in name and "2.5" in name and odds:
-                        if self.min_odds <= odds <= self.max_odds:
-                            # Calculer la confiance basée sur les cotes
-                            odds_confidence = 1.0 - ((odds - self.min_odds) / (self.max_odds - self.min_odds))
-                            odds_confidence = max(0.55, min(0.90, odds_confidence))
-                            
-                            # Calculer la stabilité
-                            avg_over_25_odds = 1.90  # Cote moyenne fictive pour over 2.5
-                            stability = 1.0 - min(1.0, abs(odds - avg_over_25_odds) / avg_over_25_odds)
-                            result["stability"] = stability
-                            
-                            # Stocker les cotes et la confiance brute
-                            result["odds"] = odds
-                            result["raw_confidence"] = odds_confidence
-                            return result
-        
-        return None
-
-    def find_btts_yes(self, markets):
-        """Modèle de calcul pour la prédiction Les deux équipes marquent - Oui."""
-        result = {
-            "type": "Les 2 équipes marquent",
-            "odds": None,
-            "confidence": 0,
-            "stability": 0
-        }
-        
-        for market_id, market in markets.items():
-            market_name = market.get("name", "").lower()
-            
-            if "both teams to score" in market_name:
-                for outcome in market.get("outcomes", []):
-                    name = outcome.get("name", "").lower()
-                    odds = outcome.get("odds")
-                    
-                    if (name in ["yes", "oui"] or "yes" in name) and odds:
-                        if self.min_odds <= odds <= self.max_odds:
-                            # Calculer la confiance basée sur les cotes
-                            odds_confidence = 1.0 - ((odds - self.min_odds) / (self.max_odds - self.min_odds))
-                            odds_confidence = max(0.5, min(0.85, odds_confidence))
-                            
-                            # Calculer la stabilité
-                            avg_btts_yes_odds = 1.85  # Cote moyenne fictive pour BTTS Yes
-                            stability = 1.0 - min(1.0, abs(odds - avg_btts_yes_odds) / avg_btts_yes_odds)
-                            result["stability"] = stability
-                            
-                            # Stocker les cotes et la confiance brute
-                            result["odds"] = odds
-                            result["raw_confidence"] = odds_confidence
-                            return result
-        
-        return None
-
-    def find_btts_no(self, markets):
-        """Modèle de calcul pour la prédiction Les deux équipes marquent - Non."""
-        result = {
-            "type": "Les 2 équipes ne marquent pas",
-            "odds": None,
-            "confidence": 0,
-            "stability": 0
-        }
-        
-        for market_id, market in markets.items():
-            market_name = market.get("name", "").lower()
-            
-            if "both teams to score" in market_name:
-                for outcome in market.get("outcomes", []):
-                    name = outcome.get("name", "").lower()
-                    odds = outcome.get("odds")
-                    
-                    if (name in ["no", "non"] or "no" in name) and odds:
-                        if self.min_odds <= odds <= self.max_odds:
-                            # Calculer la confiance basée sur les cotes
-                            odds_confidence = 1.0 - ((odds - self.min_odds) / (self.max_odds - self.min_odds))
-                            odds_confidence = max(0.5, min(0.85, odds_confidence))
-                            
-                            # Calculer la stabilité
-                            avg_btts_no_odds = 1.95  # Cote moyenne fictive pour BTTS No
-                            stability = 1.0 - min(1.0, abs(odds - avg_btts_no_odds) / avg_btts_no_odds)
-                            result["stability"] = stability
-                            
-                            # Stocker les cotes et la confiance brute
-                            result["odds"] = odds
-                            result["raw_confidence"] = odds_confidence
-                            return result
-        
-        return None
-
-    def find_double_chance_1X(self, markets):
+    def find_double_chance_1X(self, markets, basic_odds):
         """Modèle de calcul pour la prédiction Double Chance 1X."""
+        # Ne proposer 1X que si l'équipe à domicile a une cote élevée
+        if basic_odds.get("home") and basic_odds.get("home") < self.high_odds_threshold:
+            return None
+            
         result = {
             "type": "1X",
             "odds": None,
@@ -686,8 +539,12 @@ class FootballPredictionBot:
         
         return None
 
-    def find_double_chance_X2(self, markets):
+    def find_double_chance_X2(self, markets, basic_odds):
         """Modèle de calcul pour la prédiction Double Chance X2."""
+        # Ne proposer X2 que si l'équipe à l'extérieur a une cote élevée
+        if basic_odds.get("away") and basic_odds.get("away") < self.high_odds_threshold:
+            return None
+            
         result = {
             "type": "X2",
             "odds": None,
@@ -722,42 +579,6 @@ class FootballPredictionBot:
         
         return None
 
-    def find_double_chance_12(self, markets):
-        """Modèle de calcul pour la prédiction Double Chance 12."""
-        result = {
-            "type": "12",
-            "odds": None,
-            "confidence": 0,
-            "stability": 0
-        }
-        
-        for market_id, market in markets.items():
-            market_name = market.get("name", "").lower()
-            
-            if "double chance" in market_name:
-                for outcome in market.get("outcomes", []):
-                    name = outcome.get("name", "")
-                    odds = outcome.get("odds")
-                    
-                    # On cherche 12, Home Or Away, HOME Or AWAY, etc.
-                    if ("12" in name or "HOME Or AWAY" in name or "HOME or AWAY" in name or "home or away" in name) and odds:
-                        if self.min_odds <= odds <= self.max_odds:
-                            # Calculer la confiance basée sur les cotes
-                            odds_confidence = 1.0 - ((odds - self.min_odds) / (self.max_odds - self.min_odds))
-                            odds_confidence = max(0.5, min(0.85, odds_confidence))
-                            
-                            # Calculer la stabilité
-                            avg_12_odds = 1.25  # Cote moyenne fictive pour 12
-                            stability = 1.0 - min(1.0, abs(odds - avg_12_odds) / avg_12_odds)
-                            result["stability"] = stability
-                            
-                            # Stocker les cotes et la confiance brute
-                            result["odds"] = odds
-                            result["raw_confidence"] = odds_confidence
-                            return result
-        
-        return None
-
     def calculate_prediction_confidence(self, prediction, league_name):
         """
         Calcule la confiance finale pour une prédiction en tenant compte de plusieurs facteurs:
@@ -778,26 +599,18 @@ class FootballPredictionBot:
         
         # Ajuster selon le type de prédiction et le profil de la ligue
         if league_profile == "low":
-            # Les ligues à faible scoring favorisent les "under" et défavorisent les "over" et "btts_yes"
-            if "buts" in prediction_type and "-" in prediction_type:  # Under goals
+            # Les ligues à faible scoring favorisent les "under" et défavorisent les "over"
+            if prediction_type == "-3.5 buts" or prediction_type == "-4.5 buts":
                 league_factor = 1.15
-            elif "buts" in prediction_type and "+" in prediction_type:  # Over goals
+            elif prediction_type == "+1.5 buts":
                 league_factor = 0.85
-            elif prediction_type == "Les 2 équipes marquent":  # BTTS Yes
-                league_factor = 0.80
-            elif prediction_type == "Les 2 équipes ne marquent pas":  # BTTS No
-                league_factor = 1.20
         
         elif league_profile == "high":
-            # Les ligues à fort scoring favorisent les "over" et "btts_yes" et défavorisent les "under"
-            if "buts" in prediction_type and "-" in prediction_type:  # Under goals
+            # Les ligues à fort scoring favorisent les "over" et défavorisent les "under"
+            if prediction_type == "-3.5 buts" or prediction_type == "-4.5 buts":
                 league_factor = 0.85
-            elif "buts" in prediction_type and "+" in prediction_type:  # Over goals
+            elif prediction_type == "+1.5 buts":
                 league_factor = 1.15
-            elif prediction_type == "Les 2 équipes marquent":  # BTTS Yes
-                league_factor = 1.15
-            elif prediction_type == "Les 2 équipes ne marquent pas":  # BTTS No
-                league_factor = 0.80
         
         # La confiance finale est une moyenne pondérée des différents facteurs
         weighted_confidence = (
@@ -819,31 +632,46 @@ class FootballPredictionBot:
         Génère toutes les prédictions possibles pour un match spécifique,
         calcule leur confiance et les trie par niveau de confiance.
         """
-        # Liste des fonctions de prédiction à appliquer
-        prediction_functions = [
-            self.find_under_25_goals,
-            self.find_under_35_goals,
-            self.find_under_45_goals,
-            self.find_over_05_goals,
-            self.find_over_15_goals,
-            self.find_over_25_goals,
-            self.find_btts_yes,
-            self.find_btts_no,
-            self.find_double_chance_1X,
-            self.find_double_chance_X2,
-            self.find_double_chance_12
-        ]
+        # Récupérer les cotes de base pour déterminer si on propose des doubles chances
+        basic_odds = self.get_teams_basic_odds(markets)
         
-        # Générer toutes les prédictions possibles
+        # Liste des prédictions possibles
         all_predictions = []
         
-        for func in prediction_functions:
-            prediction = func(markets)
-            if prediction:
-                # Calculer la confiance finale de la prédiction
-                prediction_with_confidence = self.calculate_prediction_confidence(prediction, league_name)
-                if prediction_with_confidence:
-                    all_predictions.append(prediction_with_confidence)
+        # 1. Under 3.5 buts
+        prediction = self.find_under_35_goals(markets)
+        if prediction:
+            prediction_with_confidence = self.calculate_prediction_confidence(prediction, league_name)
+            if prediction_with_confidence:
+                all_predictions.append(prediction_with_confidence)
+        
+        # 2. Under 4.5 buts
+        prediction = self.find_under_45_goals(markets)
+        if prediction:
+            prediction_with_confidence = self.calculate_prediction_confidence(prediction, league_name)
+            if prediction_with_confidence:
+                all_predictions.append(prediction_with_confidence)
+        
+        # 3. Over 1.5 buts
+        prediction = self.find_over_15_goals(markets)
+        if prediction:
+            prediction_with_confidence = self.calculate_prediction_confidence(prediction, league_name)
+            if prediction_with_confidence:
+                all_predictions.append(prediction_with_confidence)
+        
+        # 4. Double Chance 1X (uniquement si cote élevée)
+        prediction = self.find_double_chance_1X(markets, basic_odds)
+        if prediction:
+            prediction_with_confidence = self.calculate_prediction_confidence(prediction, league_name)
+            if prediction_with_confidence:
+                all_predictions.append(prediction_with_confidence)
+        
+        # 5. Double Chance X2 (uniquement si cote élevée)
+        prediction = self.find_double_chance_X2(markets, basic_odds)
+        if prediction:
+            prediction_with_confidence = self.calculate_prediction_confidence(prediction, league_name)
+            if prediction_with_confidence:
+                all_predictions.append(prediction_with_confidence)
         
         # Trier les prédictions par niveau de confiance (décroissant)
         all_predictions.sort(key=lambda x: x["confidence"], reverse=True)
@@ -904,7 +732,7 @@ class FootballPredictionBot:
                     prediction_type = prediction["type"]
                     
                     # Accepter les under goals comme répétitions pour les ligues à faible scoring
-                    if ("buts" in prediction_type and "-" in prediction_type) or prediction_type == "Les 2 équipes ne marquent pas":
+                    if prediction_type == "-3.5 buts" or prediction_type == "-4.5 buts":
                         selected_prediction = prediction
                         break
             
@@ -939,11 +767,12 @@ class FootballPredictionBot:
         logger.info(f"Prédictions générées pour {len(self.predictions)} match(s) avec une cote totale de {self.coupon_total_odds}")
     
     def format_prediction_message(self):
-        """Formate le message de prédiction pour Telegram."""
+        """Formate le message de prédiction pour Telegram avec les parties en gras."""
         now = datetime.now(self.timezone)
         date_str = now.strftime("%d/%m/%Y")
         
-        message = f"🔮 *COUPON DU JOUR* 🔮\n"
+        # Commencer le message en italique
+        message = "🔮 *COUPON DU JOUR* 🔮\n"
         message += f"📅 *{date_str}*\n\n"
         
         # Si aucune prédiction n'a été générée
@@ -961,15 +790,13 @@ class FootballPredictionBot:
             start_time = datetime.fromtimestamp(pred["start_timestamp"], self.timezone).strftime("%H:%M")
             
             message += f"🏆 {pred['league_name'].upper()}\n"
-            message += f"⚽ {pred['home_team']} vs {pred['away_team']} | {start_time}\n"
+            message += f"⚽️ {pred['home_team']} vs {pred['away_team']} | {start_time}\n"
             message += f"🎯 Prédiction: {pred['type']}\n"
             message += f"💰 Cote: {pred['odds']}\n"
         
-        # Ajouter la cote totale
+        # Ajouter la cote totale et conseils en gras
         message += f"----------------------------\n\n"
         message += f"📊 *COTE TOTALE: {self.coupon_total_odds}*\n\n"
-        
-        # Conseil de bankroll et jeu responsable
         message += f"💡 *Misez toujours 5% de votre capital*\n"
         message += f"🔞 *Pariez de façon responsable.*"
         
