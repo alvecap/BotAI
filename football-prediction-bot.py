@@ -403,6 +403,9 @@ class FootballPredictionBot:
             "stability": 0
         }
         
+        # Stocker toutes les cotes trouvées pour pouvoir les vérifier
+        found_odds = []
+        
         for market_id, market in markets.items():
             market_name = market.get("name", "").lower()
             
@@ -412,20 +415,31 @@ class FootballPredictionBot:
                     odds = outcome.get("odds")
                     
                     if "under" in name and "3.5" in name and odds:
+                        # Vérifier que les cotes sont dans notre plage et ajouter à la liste
                         if self.min_odds <= odds <= self.max_odds:
-                            # Calculer la confiance basée sur les cotes
-                            odds_confidence = 1.0 - ((odds - self.min_odds) / (self.max_odds - self.min_odds))
-                            odds_confidence = max(0.5, min(0.95, odds_confidence))
-                            
-                            # Calculer la stabilité
-                            avg_under_35_odds = 1.45  # Cote moyenne fictive pour under 3.5
-                            stability = 1.0 - min(1.0, abs(odds - avg_under_35_odds) / avg_under_35_odds)
-                            result["stability"] = stability
-                            
-                            # Stocker les cotes et la confiance brute
-                            result["odds"] = odds
-                            result["raw_confidence"] = odds_confidence
-                            return result
+                            found_odds.append({"odds": odds, "market_name": market_name})
+        
+        # Si plusieurs cotes sont trouvées, prendre celle du marché principal
+        if found_odds:
+            # Trier d'abord par nom de marché (préférer "total" simple) puis par cote (préférer la plus fiable)
+            found_odds.sort(key=lambda x: (0 if x["market_name"] == "total" else 1, abs(x["odds"] - 1.45)))
+            
+            # Prendre la meilleure cote
+            best_odds = found_odds[0]["odds"]
+            
+            # Calculer la confiance basée sur les cotes
+            odds_confidence = 1.0 - ((best_odds - self.min_odds) / (self.max_odds - self.min_odds))
+            odds_confidence = max(0.5, min(0.95, odds_confidence))
+            
+            # Calculer la stabilité
+            avg_under_35_odds = 1.45  # Cote moyenne fictive pour under 3.5
+            stability = 1.0 - min(1.0, abs(best_odds - avg_under_35_odds) / avg_under_35_odds)
+            
+            # Stocker les cotes et la confiance brute
+            result["odds"] = best_odds
+            result["raw_confidence"] = odds_confidence
+            result["stability"] = stability
+            return result
         
         return None
 
@@ -438,6 +452,9 @@ class FootballPredictionBot:
             "stability": 0
         }
         
+        # Stocker toutes les cotes trouvées pour pouvoir les vérifier
+        found_odds = []
+        
         for market_id, market in markets.items():
             market_name = market.get("name", "").lower()
             
@@ -447,20 +464,31 @@ class FootballPredictionBot:
                     odds = outcome.get("odds")
                     
                     if "under" in name and "4.5" in name and odds:
+                        # Vérifier que les cotes sont dans notre plage et ajouter à la liste
                         if self.min_odds <= odds <= self.max_odds:
-                            # Calculer la confiance basée sur les cotes
-                            odds_confidence = 1.0 - ((odds - self.min_odds) / (self.max_odds - self.min_odds))
-                            odds_confidence = max(0.6, min(0.95, odds_confidence))
-                            
-                            # Calculer la stabilité
-                            avg_under_45_odds = 1.25  # Cote moyenne fictive pour under 4.5
-                            stability = 1.0 - min(1.0, abs(odds - avg_under_45_odds) / avg_under_45_odds)
-                            result["stability"] = stability
-                            
-                            # Stocker les cotes et la confiance brute
-                            result["odds"] = odds
-                            result["raw_confidence"] = odds_confidence
-                            return result
+                            found_odds.append({"odds": odds, "market_name": market_name})
+        
+        # Si plusieurs cotes sont trouvées, prendre celle du marché principal
+        if found_odds:
+            # Trier d'abord par nom de marché (préférer "total" simple) puis par cote (préférer la plus fiable)
+            found_odds.sort(key=lambda x: (0 if x["market_name"] == "total" else 1, abs(x["odds"] - 1.25)))
+            
+            # Prendre la meilleure cote
+            best_odds = found_odds[0]["odds"]
+            
+            # Calculer la confiance basée sur les cotes
+            odds_confidence = 1.0 - ((best_odds - self.min_odds) / (self.max_odds - self.min_odds))
+            odds_confidence = max(0.6, min(0.95, odds_confidence))
+            
+            # Calculer la stabilité
+            avg_under_45_odds = 1.25  # Cote moyenne fictive pour under 4.5
+            stability = 1.0 - min(1.0, abs(best_odds - avg_under_45_odds) / avg_under_45_odds)
+            
+            # Stocker les cotes et la confiance brute
+            result["odds"] = best_odds
+            result["raw_confidence"] = odds_confidence
+            result["stability"] = stability
+            return result
         
         return None
 
@@ -473,6 +501,9 @@ class FootballPredictionBot:
             "stability": 0
         }
         
+        # Stocker toutes les cotes trouvées pour pouvoir les vérifier
+        found_odds = []
+        
         for market_id, market in markets.items():
             market_name = market.get("name", "").lower()
             
@@ -482,20 +513,31 @@ class FootballPredictionBot:
                     odds = outcome.get("odds")
                     
                     if "over" in name and "1.5" in name and odds:
+                        # Vérifier que les cotes sont dans notre plage et ajouter à la liste
                         if self.min_odds <= odds <= self.max_odds:
-                            # Calculer la confiance basée sur les cotes
-                            odds_confidence = 1.0 - ((odds - self.min_odds) / (self.max_odds - self.min_odds))
-                            odds_confidence = max(0.6, min(0.92, odds_confidence))
-                            
-                            # Calculer la stabilité
-                            avg_over_15_odds = 1.40  # Cote moyenne fictive pour over 1.5
-                            stability = 1.0 - min(1.0, abs(odds - avg_over_15_odds) / avg_over_15_odds)
-                            result["stability"] = stability
-                            
-                            # Stocker les cotes et la confiance brute
-                            result["odds"] = odds
-                            result["raw_confidence"] = odds_confidence
-                            return result
+                            found_odds.append({"odds": odds, "market_name": market_name})
+        
+        # Si plusieurs cotes sont trouvées, prendre celle du marché principal
+        if found_odds:
+            # Trier d'abord par nom de marché (préférer "total" simple) puis par cote (préférer la plus fiable)
+            found_odds.sort(key=lambda x: (0 if x["market_name"] == "total" else 1, abs(x["odds"] - 1.40)))
+            
+            # Prendre la meilleure cote
+            best_odds = found_odds[0]["odds"]
+            
+            # Calculer la confiance basée sur les cotes
+            odds_confidence = 1.0 - ((best_odds - self.min_odds) / (self.max_odds - self.min_odds))
+            odds_confidence = max(0.6, min(0.92, odds_confidence))
+            
+            # Calculer la stabilité
+            avg_over_15_odds = 1.40  # Cote moyenne fictive pour over 1.5
+            stability = 1.0 - min(1.0, abs(best_odds - avg_over_15_odds) / avg_over_15_odds)
+            
+            # Stocker les cotes et la confiance brute
+            result["odds"] = best_odds
+            result["raw_confidence"] = odds_confidence
+            result["stability"] = stability
+            return result
         
         return None
 
@@ -512,6 +554,9 @@ class FootballPredictionBot:
             "stability": 0
         }
         
+        # Stocker toutes les cotes trouvées pour pouvoir les vérifier
+        found_odds = []
+        
         for market_id, market in markets.items():
             market_name = market.get("name", "").lower()
             
@@ -522,20 +567,31 @@ class FootballPredictionBot:
                     
                     # On cherche 1X, Home Or X, HOME Or X, etc.
                     if ("1X" in name or "HOME Or X" in name or "HOME or X" in name or "home or x" in name) and odds:
+                        # Vérifier que les cotes sont dans notre plage et ajouter à la liste
                         if self.min_odds <= odds <= self.max_odds:
-                            # Calculer la confiance basée sur les cotes
-                            odds_confidence = 1.0 - ((odds - self.min_odds) / (self.max_odds - self.min_odds))
-                            odds_confidence = max(0.6, min(0.92, odds_confidence))
-                            
-                            # Calculer la stabilité
-                            avg_1X_odds = 1.50  # Cote moyenne fictive pour 1X
-                            stability = 1.0 - min(1.0, abs(odds - avg_1X_odds) / avg_1X_odds)
-                            result["stability"] = stability
-                            
-                            # Stocker les cotes et la confiance brute
-                            result["odds"] = odds
-                            result["raw_confidence"] = odds_confidence
-                            return result
+                            found_odds.append({"odds": odds, "name": name})
+        
+        # Si plusieurs cotes sont trouvées, prendre la plus fiable
+        if found_odds:
+            # Trier par proximité avec la cote moyenne attendue
+            found_odds.sort(key=lambda x: abs(x["odds"] - 1.50))
+            
+            # Prendre la meilleure cote
+            best_odds = found_odds[0]["odds"]
+            
+            # Calculer la confiance basée sur les cotes
+            odds_confidence = 1.0 - ((best_odds - self.min_odds) / (self.max_odds - self.min_odds))
+            odds_confidence = max(0.6, min(0.92, odds_confidence))
+            
+            # Calculer la stabilité
+            avg_1X_odds = 1.50  # Cote moyenne fictive pour 1X
+            stability = 1.0 - min(1.0, abs(best_odds - avg_1X_odds) / avg_1X_odds)
+            
+            # Stocker les cotes et la confiance brute
+            result["odds"] = best_odds
+            result["raw_confidence"] = odds_confidence
+            result["stability"] = stability
+            return result
         
         return None
 
@@ -552,6 +608,9 @@ class FootballPredictionBot:
             "stability": 0
         }
         
+        # Stocker toutes les cotes trouvées pour pouvoir les vérifier
+        found_odds = []
+        
         for market_id, market in markets.items():
             market_name = market.get("name", "").lower()
             
@@ -560,22 +619,33 @@ class FootballPredictionBot:
                     name = outcome.get("name", "")
                     odds = outcome.get("odds")
                     
-                    # On cherche X2, Away Or X, AWAY Or X, etc.
+                    # On cherche X2, Away OrX, AWAY Or X, etc.
                     if ("X2" in name or "AWAY Or X" in name or "AWAY or X" in name or "away or x" in name) and odds:
+                        # Vérifier que les cotes sont dans notre plage et ajouter à la liste
                         if self.min_odds <= odds <= self.max_odds:
-                            # Calculer la confiance basée sur les cotes
-                            odds_confidence = 1.0 - ((odds - self.min_odds) / (self.max_odds - self.min_odds))
-                            odds_confidence = max(0.55, min(0.88, odds_confidence))
-                            
-                            # Calculer la stabilité
-                            avg_X2_odds = 1.75  # Cote moyenne fictive pour X2
-                            stability = 1.0 - min(1.0, abs(odds - avg_X2_odds) / avg_X2_odds)
-                            result["stability"] = stability
-                            
-                            # Stocker les cotes et la confiance brute
-                            result["odds"] = odds
-                            result["raw_confidence"] = odds_confidence
-                            return result
+                            found_odds.append({"odds": odds, "name": name})
+        
+        # Si plusieurs cotes sont trouvées, prendre la plus fiable
+        if found_odds:
+            # Trier par proximité avec la cote moyenne attendue
+            found_odds.sort(key=lambda x: abs(x["odds"] - 1.75))
+            
+            # Prendre la meilleure cote
+            best_odds = found_odds[0]["odds"]
+            
+            # Calculer la confiance basée sur les cotes
+            odds_confidence = 1.0 - ((best_odds - self.min_odds) / (self.max_odds - self.min_odds))
+            odds_confidence = max(0.55, min(0.88, odds_confidence))
+            
+            # Calculer la stabilité
+            avg_X2_odds = 1.75  # Cote moyenne fictive pour X2
+            stability = 1.0 - min(1.0, abs(best_odds - avg_X2_odds) / avg_X2_odds)
+            
+            # Stocker les cotes et la confiance brute
+            result["odds"] = best_odds
+            result["raw_confidence"] = odds_confidence
+            result["stability"] = stability
+            return result
         
         return None
 
@@ -767,11 +837,11 @@ class FootballPredictionBot:
         logger.info(f"Prédictions générées pour {len(self.predictions)} match(s) avec une cote totale de {self.coupon_total_odds}")
     
     def format_prediction_message(self):
-        """Formate le message de prédiction pour Telegram avec les parties en gras."""
+        """Formate le message de prédiction pour Telegram avec mise en forme Markdown améliorée."""
         now = datetime.now(self.timezone)
         date_str = now.strftime("%d/%m/%Y")
         
-        # Commencer le message en italique
+        # Titre en gras avec émojis
         message = "🔮 *COUPON DU JOUR* 🔮\n"
         message += f"📅 *{date_str}*\n\n"
         
@@ -789,10 +859,17 @@ class FootballPredictionBot:
             # Calculer l'heure du match au format local
             start_time = datetime.fromtimestamp(pred["start_timestamp"], self.timezone).strftime("%H:%M")
             
-            message += f"🏆 {pred['league_name'].upper()}\n"
-            message += f"⚽️ {pred['home_team']} vs {pred['away_team']} | {start_time}\n"
-            message += f"🎯 Prédiction: {pred['type']}\n"
-            message += f"💰 Cote: {pred['odds']}\n"
+            # Nom de la ligue en gras
+            message += f"🏆 *{pred['league_name'].upper()}*\n"
+            
+            # Équipes et heure du match
+            message += f"⚽️ *{pred['home_team']} vs {pred['away_team']}* | _{start_time}_\n"
+            
+            # Prédiction en gras
+            message += f"🎯 Prédiction: *{pred['type']}*\n"
+            
+            # Cote en italique
+            message += f"💰 Cote: _{pred['odds']}_\n"
         
         # Ajouter la cote totale et conseils en gras
         message += f"----------------------------\n\n"
