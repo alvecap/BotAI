@@ -838,6 +838,7 @@ class FootballPredictionBot:
     
     def format_prediction_message(self):
     """Formate le message de prédiction pour Telegram avec mise en forme Markdown améliorée."""
+    # Reste du code...
     now = datetime.now(self.timezone)
     date_str = now.strftime("%d/%m/%Y")
     
