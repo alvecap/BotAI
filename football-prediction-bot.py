@@ -44,10 +44,32 @@ class FootballPredictionBot:
         self.timezone = pytz.timezone('Africa/Brazzaville')
         
         # Cote minimale pour les prédictions
-        self.min_odds = 1.10
+        self.min_odds = 1.15
+        
+        # Cote maximale à accepter pour les prédictions (pour éviter les paris trop risqués)
+        self.max_odds = 2.50
         
         # Liste des IDs de ligue connus qui fonctionnent
-        self.league_ids = [1, 118, 148, 127, 110, 136, 251, 252, 253]
+        self.league_ids = [1, 118, 148, 127, 110, 136, 251, 252, 253, 301, 302, 303, 304]
+        
+        # Championnats à faible scoring (priorité pour les prédictions "under")
+        self.low_scoring_leagues = [
+            # Championnats africains
+            "ghana", "nigeria", "kenya", "tanzania", "ethiopia", "south africa", 
+            "morocco", "algeria", "tunisia", "cameroon", "ivory coast", "senegal",
+            # Championnats latino-américains avec faible scoring
+            "peru", "bolivia", "venezuela", "ecuador", "colombia",
+            # Championnats secondaires européens
+            "belarus", "estonia", "latvia", "lithuania", "finland", "iceland"
+        ]
+        
+        # Seuils de cotes pour différents types de paris
+        self.odds_thresholds = {
+            "under_goals": 1.20,  # Seuil minimal pour under goals
+            "over_goals": 1.25,   # Seuil minimal pour over goals
+            "btts": 1.40,         # Seuil minimal pour les 2 équipes marquent
+            "double_chance": 1.15  # Seuil minimal pour double chance
+        }
     
     def _check_env_variables(self):
         """Vérifie que toutes les variables d'environnement requises sont définies."""
@@ -207,21 +229,61 @@ class FootballPredictionBot:
         logger.info(f"Total des matchs à venir trouvés pour aujourd'hui: {len(all_matches)}")
         return all_matches
     
+    def is_low_scoring_league(self, league_name):
+        """Détermine si une ligue est considérée comme à faible scoring."""
+        if not league_name:
+            return False
+            
+        league_name_lower = league_name.lower()
+        return any(league in league_name_lower for league in self.low_scoring_leagues)
+    
     def select_matches(self, all_matches):
-        """Sélectionne jusqu'à 5 matchs parmi les matchs disponibles."""
+        """Sélectionne des matchs pour les prédictions en donnant priorité aux ligues à faible scoring."""
         if not all_matches:
             logger.warning("Aucun match disponible pour la sélection.")
             return
         
-        # Limiter à 5 matchs maximum
-        max_matches = min(5, len(all_matches))
+        # Trier les matchs en deux catégories: championnats à faible scoring et autres
+        low_scoring_matches = []
+        other_matches = []
         
-        if len(all_matches) <= max_matches:
-            self.selected_matches = all_matches
-        else:
-            self.selected_matches = random.sample(all_matches, max_matches)
+        for match in all_matches:
+            league_name = match.get("league", "")
+            if self.is_low_scoring_league(league_name):
+                low_scoring_matches.append(match)
+            else:
+                other_matches.append(match)
+        
+        logger.info(f"Matchs de championnats à faible scoring disponibles: {len(low_scoring_matches)}")
+        logger.info(f"Autres matchs disponibles: {len(other_matches)}")
+        
+        # Donner la priorité aux matchs de ligues à faible scoring (au moins 60% des sélections)
+        max_matches = min(5, len(all_matches))
+        low_scoring_quota = max(1, int(max_matches * 0.6))
+        
+        selected_low_scoring = []
+        selected_other = []
+        
+        # Sélectionner des matchs de ligues à faible scoring
+        if low_scoring_matches:
+            selected_low_scoring = random.sample(
+                low_scoring_matches, 
+                min(low_scoring_quota, len(low_scoring_matches))
+            )
+        
+        # Compléter avec d'autres matchs
+        remaining_slots = max_matches - len(selected_low_scoring)
+        if remaining_slots > 0 and other_matches:
+            selected_other = random.sample(
+                other_matches, 
+                min(remaining_slots, len(other_matches))
+            )
+        
+        # Combiner les sélections
+        self.selected_matches = selected_low_scoring + selected_other
         
         logger.info(f"=== SÉLECTION DE {len(self.selected_matches)} MATCH(S) POUR LES PRÉDICTIONS ===")
+        logger.info(f"Dont {len(selected_low_scoring)} matchs de ligues à faible scoring et {len(selected_other)} autres matchs")
         
         # Afficher les matchs sélectionnés
         for i, match in enumerate(self.selected_matches):
@@ -229,7 +291,7 @@ class FootballPredictionBot:
             start_time = datetime.fromtimestamp(start_timestamp, self.timezone)
             home_team = match.get("home_team", "Équipe inconnue")
             away_team = match.get("away_team", "Équipe inconnue")
-            league_name = match.get("league", "Ligue inconnue")  # Nom de la ligue comme chaîne de texte
+            league_name = match.get("league", "Ligue inconnue")
             
             logger.info(f"Match {i+1}: {home_team} vs {away_team} - {league_name}")
             logger.info(f"  ID: {match.get('id')}")
@@ -246,8 +308,32 @@ class FootballPredictionBot:
         
         return response.get("data", {})
 
+    def find_under_25_goals(self, markets):
+        """Recherche la prédiction Under 2.5 buts - idéal pour les matchs de ligues à faible scoring."""
+        min_odds = self.odds_thresholds["under_goals"]
+        
+        for market_id, market in markets.items():
+            market_name = market.get("name", "").lower()
+            
+            if "total" in market_name and not "team" in market_name:
+                for outcome in market.get("outcomes", []):
+                    name = outcome.get("name", "").lower()
+                    odds = outcome.get("odds")
+                    
+                    if "under" in name and "2.5" in name and odds:
+                        if min_odds <= odds <= self.max_odds:
+                            return {
+                                "type": "-2.5 buts",
+                                "odds": odds,
+                                "confidence": 0.92
+                            }
+        
+        return None
+
     def find_under_35_goals(self, markets):
-        """Recherche la prédiction Under 3.5 buts."""
+        """Recherche la prédiction Under 3.5 buts - bonne option pour la plupart des matchs."""
+        min_odds = self.odds_thresholds["under_goals"]
+        
         for market_id, market in markets.items():
             market_name = market.get("name", "").lower()
             
@@ -257,8 +343,7 @@ class FootballPredictionBot:
                     odds = outcome.get("odds")
                     
                     if "under" in name and "3.5" in name and odds:
-                        # Vérifier que la cote est supérieure au minimum
-                        if odds >= self.min_odds:
+                        if min_odds <= odds <= self.max_odds:
                             return {
                                 "type": "-3.5 buts",
                                 "odds": odds,
@@ -267,8 +352,10 @@ class FootballPredictionBot:
         
         return None
 
-    def find_under_45_goals(self, markets):
-        """Recherche la prédiction Under 4.5 buts."""
+    def find_over_05_goals(self, markets):
+        """Recherche la prédiction Over 0.5 buts - option très sûre."""
+        min_odds = self.odds_thresholds["over_goals"]
+        
         for market_id, market in markets.items():
             market_name = market.get("name", "").lower()
             
@@ -277,19 +364,20 @@ class FootballPredictionBot:
                     name = outcome.get("name", "").lower()
                     odds = outcome.get("odds")
                     
-                    if "under" in name and "4.5" in name and odds:
-                        # Vérifier que la cote est supérieure au minimum
-                        if odds >= self.min_odds:
+                    if "over" in name and "0.5" in name and odds:
+                        if min_odds <= odds <= self.max_odds:
                             return {
-                                "type": "-4.5 buts",
+                                "type": "+0.5 buts",
                                 "odds": odds,
-                                "confidence": 0.92
+                                "confidence": 0.95
                             }
         
         return None
 
     def find_over_15_goals(self, markets):
         """Recherche la prédiction Over 1.5 buts."""
+        min_odds = self.odds_thresholds["over_goals"]
+        
         for market_id, market in markets.items():
             market_name = market.get("name", "").lower()
             
@@ -299,18 +387,19 @@ class FootballPredictionBot:
                     odds = outcome.get("odds")
                     
                     if "over" in name and "1.5" in name and odds:
-                        # Vérifier que la cote est supérieure au minimum
-                        if odds >= self.min_odds:
+                        if min_odds <= odds <= self.max_odds:
                             return {
                                 "type": "+1.5 buts",
                                 "odds": odds,
-                                "confidence": 0.88
+                                "confidence": 0.85
                             }
         
         return None
 
     def find_both_teams_to_score(self, markets):
-        """Recherche la prédiction Les deux équipes marquent."""
+        """Recherche la prédiction Les deux équipes marquent - à utiliser avec précaution."""
+        min_odds = self.odds_thresholds["btts"]
+        
         for market_id, market in markets.items():
             market_name = market.get("name", "").lower()
             
@@ -320,18 +409,19 @@ class FootballPredictionBot:
                     odds = outcome.get("odds")
                     
                     if (name in ["yes", "oui"] or "yes" in name) and odds:
-                        # Vérifier que la cote est supérieure au minimum
-                        if odds >= self.min_odds:
+                        if min_odds <= odds <= self.max_odds:
                             return {
                                 "type": "Les 2 équipes marquent",
                                 "odds": odds,
-                                "confidence": 0.82
+                                "confidence": 0.75
                             }
         
         return None
 
     def find_double_chance(self, markets):
-        """Recherche la prédiction de Double Chance (1X, X2, 12)."""
+        """Recherche la prédiction de Double Chance (1X, X2, 12) - bonne option pour équipes favorites."""
+        min_odds = self.odds_thresholds["double_chance"]
+        
         for market_id, market in markets.items():
             market_name = market.get("name", "").lower()
             
@@ -344,12 +434,12 @@ class FootballPredictionBot:
                     name = outcome.get("name", "")
                     odds = outcome.get("odds")
                     
-                    if not odds or odds < self.min_odds:
+                    if not odds or odds < min_odds or odds > self.max_odds:
                         continue
                     
                     if name == "1X":
                         # 1X: Victoire domicile ou match nul
-                        confidence = 0.85
+                        confidence = 0.88
                         dc_type = "1X"
                     elif name == "X2":
                         # X2: Match nul ou victoire extérieur
@@ -357,13 +447,13 @@ class FootballPredictionBot:
                         dc_type = "X2"
                     elif name == "12":
                         # 12: Victoire domicile ou victoire extérieur
-                        confidence = 0.80
+                        confidence = 0.82
                         dc_type = "12"
                     else:
                         continue
                     
-                    # Si cette option est meilleure que les précédentes
-                    if confidence > best_conf:
+                    # Priorité à la meilleure option selon la confiance et la cote
+                    if odds > best_odds and confidence >= best_conf:
                         best_dc = dc_type
                         best_odds = odds
                         best_conf = confidence
@@ -378,15 +468,34 @@ class FootballPredictionBot:
         return None
 
     def generate_match_prediction(self, match_id, markets):
-        """Génère une prédiction pour un match spécifique."""
-        # Liste des fonctions de prédiction dans l'ordre de priorité
-        prediction_functions = [
-            self.find_under_45_goals,
-            self.find_under_35_goals,
-            self.find_over_15_goals,
-            self.find_both_teams_to_score,
-            self.find_double_chance
-        ]
+        """Génère une prédiction pour un match spécifique en tenant compte des spécificités régionales."""
+        
+        # Récupérer les informations du match
+        match_info = next((m for m in self.selected_matches if m.get("id") == match_id), None)
+        league_name = match_info.get("league", "") if match_info else ""
+        
+        # Déterminer si c'est un championnat à faible scoring
+        is_low_scoring = self.is_low_scoring_league(league_name)
+        
+        # Priorités différentes selon le type de championnat
+        if is_low_scoring:
+            prediction_functions = [
+                self.find_under_25_goals,     # Priorité aux matchs avec peu de buts
+                self.find_under_35_goals,     # Deuxième option pour peu de buts
+                self.find_double_chance,      # Double chance bien adaptée
+                self.find_over_05_goals,      # Option sûre pour au moins un but
+                self.find_both_teams_to_score # Dernière option car moins probable
+            ]
+            logger.info(f"Utilisation des priorités de ligue à faible scoring pour {league_name}")
+        else:
+            prediction_functions = [
+                self.find_double_chance,      # Priorité au double chance dans autres ligues
+                self.find_under_35_goals,     # Ensuite les under goals
+                self.find_over_15_goals,      # Plus de buts dans ces ligues
+                self.find_both_teams_to_score,# Plus probable dans ces ligues
+                self.find_over_05_goals       # Option de secours
+            ]
+            logger.info(f"Utilisation des priorités standard pour {league_name}")
         
         # Essayer chaque fonction dans l'ordre
         for func in prediction_functions:
@@ -404,11 +513,18 @@ class FootballPredictionBot:
         # Liste des types de prédictions déjà utilisés
         used_prediction_types = []
         
-        for match in self.selected_matches:
+        # Trier les matchs par priorité (championnats à faible scoring d'abord)
+        sorted_matches = sorted(
+            self.selected_matches,
+            key=lambda m: self.is_low_scoring_league(m.get("league", "")),
+            reverse=True
+        )
+        
+        for match in sorted_matches:
             match_id = match.get("id")
             home_team = match.get("home_team", "Équipe domicile")
             away_team = match.get("away_team", "Équipe extérieur")
-            league_name = match.get("league", "Ligue inconnue")  # Nom de la ligue comme chaîne de texte
+            league_name = match.get("league", "Ligue inconnue")
             
             logger.info(f"Analyse du match {home_team} vs {away_team} (ID: {match_id})...")
             
@@ -426,24 +542,33 @@ class FootballPredictionBot:
             if prediction:
                 # Vérifier si le type de prédiction a déjà été utilisé
                 if prediction["type"] in used_prediction_types and len(self.selected_matches) > 2:
-                    # Chercher une prédiction alternative
-                    for func in [
-                        self.find_under_45_goals,
-                        self.find_under_35_goals, 
-                        self.find_over_15_goals, 
-                        self.find_both_teams_to_score,
-                        self.find_double_chance
-                    ]:
-                        alt_prediction = func(markets)
-                        if alt_prediction and alt_prediction["type"] not in used_prediction_types:
-                            prediction = alt_prediction
-                            break
+                    # Pour les ligues à faible scoring, les "under goals" sont acceptables même si répétitifs
+                    is_under_prediction = "under" in prediction["type"].lower() or "-" in prediction["type"]
+                    is_low_scoring_match = self.is_low_scoring_league(league_name)
+                    
+                    if not (is_low_scoring_match and is_under_prediction):
+                        # Chercher une prédiction alternative
+                        logger.info(f"Recherche d'une prédiction alternative (type {prediction['type']} déjà utilisé)")
+                        
+                        # Essayer avec une liste différente de fonctions
+                        for func in [
+                            self.find_double_chance,  # Priorité pour l'alternative
+                            self.find_under_35_goals,
+                            self.find_under_25_goals,
+                            self.find_over_15_goals,
+                            self.find_over_05_goals
+                        ]:
+                            alt_prediction = func(markets)
+                            if alt_prediction and alt_prediction["type"] not in used_prediction_types:
+                                prediction = alt_prediction
+                                logger.info(f"Prédiction alternative trouvée: {prediction['type']}")
+                                break
                 
                 # Ajouter les informations du match
                 prediction["match_id"] = match_id
                 prediction["home_team"] = home_team
                 prediction["away_team"] = away_team
-                prediction["league_name"] = league_name  # Nom de la ligue comme chaîne de texte
+                prediction["league_name"] = league_name
                 prediction["start_timestamp"] = match.get("start_timestamp", 0)
                 
                 # Stocker la prédiction
@@ -464,39 +589,29 @@ class FootballPredictionBot:
         logger.info(f"Prédictions générées pour {len(self.predictions)} match(s) avec une cote totale de {self.coupon_total_odds}")
     
     def format_prediction_message(self):
-        """Formate le message de prédiction pour Telegram."""
+        """Formate le message de prédiction pour Telegram dans un format plus concis."""
         now = datetime.now(self.timezone)
         date_str = now.strftime("%d/%m/%Y")
         
-        message = f"🔮 *COUPON DE PRÉDICTIONS DU JOUR* 🔮\n"
-        message += f"📅 *{date_str}*\n\n"
+        message = f"🎲 *COUPON DU JOUR* | {date_str}\n\n"
         
         # Si aucune prédiction n'a été générée
         if not self.predictions:
-            message += "_Aucune prédiction fiable n'a pu être générée pour aujourd'hui. Revenez demain!_"
+            message += "_Aucune prédiction disponible aujourd'hui._"
             return message
         
         # Ajouter chaque prédiction au message
         for i, (match_id, pred) in enumerate(self.predictions.items()):
-            # Séparateur
-            if i > 0:
-                message += "----------------------------\n\n"
-            
             # Calculer l'heure du match au format local
             start_time = datetime.fromtimestamp(pred["start_timestamp"], self.timezone).strftime("%H:%M")
             
-            message += f"🏆 *{pred['league_name'].upper()}*\n"
-            message += f"⚽ *{pred['home_team']} vs {pred['away_team']}* | {start_time}\n"
-            message += f"🎯 Prédiction: *{pred['type']}*\n"
-            message += f"💰 Cote: *{pred['odds']}*\n\n"
+            # Format concis pour chaque match
+            message += f"• {pred['home_team']} vs {pred['away_team']} | {start_time}\n"
+            message += f"  *{pred['type']}* ({pred['odds']})\n\n"
         
         # Ajouter la cote totale
-        message += f"----------------------------\n\n"
-        message += f"📊 *COTE TOTALE: {self.coupon_total_odds}*\n\n"
-        
-        # Conseil de bankroll et jeu responsable
-        message += f"_💡 Misez seulement 5% de votre capital sur ce coupon._\n"
-        message += f"_🔞 Pariez de façon responsable. Jeux interdits aux mineurs._"
+        message += f"📊 *COTE TOTALE: {self.coupon_total_odds}*\n"
+        message += f"_Misez 5% max. 🔞 Jeu responsable._"
         
         return message
     
@@ -536,6 +651,7 @@ class FootballPredictionBot:
         else:
             logger.error("Échec de l'envoi des prédictions")
 
+# Point d'entrée principal
 # Point d'entrée principal
 if __name__ == "__main__":
     try:
