@@ -635,6 +635,7 @@ class FootballPredictionBot:
             
             # Calculer la confiance basée sur les cotes
             # Calculer la confiance basée sur les cotes
+           # Calculer la confiance basée sur les cotes
            odds_confidence = 1.0 - ((best_odds - self.min_odds) / (self.max_odds - self.min_odds))
            odds_confidence = max(0.55, min(0.88, odds_confidence))
            
