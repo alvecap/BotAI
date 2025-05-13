@@ -634,301 +634,299 @@ class FootballPredictionBot:
             best_odds = found_odds[0]["odds"]
             
             # Calculer la confiance basée sur les cotes
-            # Calculer la confiance basée sur les cotes
-           # Calculer la confiance basée sur les cotes
-           odds_confidence = 1.0 - ((best_odds - self.min_odds) / (self.max_odds - self.min_odds))
-           odds_confidence = max(0.55, min(0.88, odds_confidence))
-           
-           # Calculer la stabilité
-           avg_X2_odds = 1.75  # Cote moyenne fictive pour X2
-           stability = 1.0 - min(1.0, abs(best_odds - avg_X2_odds) / avg_X2_odds)
-           
-           # Stocker les cotes et la confiance brute
-           result["odds"] = best_odds
-           result["raw_confidence"] = odds_confidence
-           result["stability"] = stability
-           return result
-       
-       return None
+            odds_confidence = 1.0 - ((best_odds - self.min_odds) / (self.max_odds - self.min_odds))
+            odds_confidence = max(0.55, min(0.88, odds_confidence))
+            
+            # Calculer la stabilité
+            avg_X2_odds = 1.75  # Cote moyenne fictive pour X2
+            stability = 1.0 - min(1.0, abs(best_odds - avg_X2_odds) / avg_X2_odds)
+            
+            # Stocker les cotes et la confiance brute
+            result["odds"] = best_odds
+            result["raw_confidence"] = odds_confidence
+            result["stability"] = stability
+            return result
+        
+        return None
 
-   def calculate_prediction_confidence(self, prediction, league_name):
-       """
-       Calcule la confiance finale pour une prédiction en tenant compte de plusieurs facteurs:
-       1. La confiance brute basée sur les cotes
-       2. Le type de ligue (low scoring, high scoring, etc.)
-       3. La stabilité de la prédiction
-       """
-       if not prediction:
-           return None
-           
-       prediction_type = prediction["type"]
-       raw_confidence = prediction.get("raw_confidence", 0.5)
-       stability = prediction.get("stability", 0.7)
-       
-       # Ajustement selon le type de ligue
-       league_profile = self.get_league_scoring_profile(league_name)
-       league_factor = 1.0
-       
-       # Ajuster selon le type de prédiction et le profil de la ligue
-       if league_profile == "low":
-           # Les ligues à faible scoring favorisent les "under" et défavorisent les "over"
-           if prediction_type == "-3.5 buts" or prediction_type == "-4.5 buts":
-               league_factor = 1.15
-           elif prediction_type == "+1.5 buts":
-               league_factor = 0.85
-       
-       elif league_profile == "high":
-           # Les ligues à fort scoring favorisent les "over" et défavorisent les "under"
-           if prediction_type == "-3.5 buts" or prediction_type == "-4.5 buts":
-               league_factor = 0.85
-           elif prediction_type == "+1.5 buts":
-               league_factor = 1.15
-       
-       # La confiance finale est une moyenne pondérée des différents facteurs
-       weighted_confidence = (
-           self.league_weights["odds_weight"] * raw_confidence +
-           self.league_weights["league_type_weight"] * league_factor +
-           self.league_weights["stability_weight"] * stability
-       )
-       
-       # Normaliser entre 0 et 1, puis convertir en pourcentage
-       confidence_percentage = min(0.98, weighted_confidence)
-       
-       # Stocker la confiance finale dans la prédiction
-       prediction["confidence"] = confidence_percentage
-       
-       return prediction
+    def calculate_prediction_confidence(self, prediction, league_name):
+        """
+        Calcule la confiance finale pour une prédiction en tenant compte de plusieurs facteurs:
+        1. La confiance brute basée sur les cotes
+        2. Le type de ligue (low scoring, high scoring, etc.)
+        3. La stabilité de la prédiction
+        """
+        if not prediction:
+            return None
+            
+        prediction_type = prediction["type"]
+        raw_confidence = prediction.get("raw_confidence", 0.5)
+        stability = prediction.get("stability", 0.7)
+        
+        # Ajustement selon le type de ligue
+        league_profile = self.get_league_scoring_profile(league_name)
+        league_factor = 1.0
+        
+        # Ajuster selon le type de prédiction et le profil de la ligue
+        if league_profile == "low":
+            # Les ligues à faible scoring favorisent les "under" et défavorisent les "over"
+            if prediction_type == "-3.5 buts" or prediction_type == "-4.5 buts":
+                league_factor = 1.15
+            elif prediction_type == "+1.5 buts":
+                league_factor = 0.85
+        
+        elif league_profile == "high":
+            # Les ligues à fort scoring favorisent les "over" et défavorisent les "under"
+            if prediction_type == "-3.5 buts" or prediction_type == "-4.5 buts":
+                league_factor = 0.85
+            elif prediction_type == "+1.5 buts":
+                league_factor = 1.15
+        
+        # La confiance finale est une moyenne pondérée des différents facteurs
+        weighted_confidence = (
+            self.league_weights["odds_weight"] * raw_confidence +
+            self.league_weights["league_type_weight"] * league_factor +
+            self.league_weights["stability_weight"] * stability
+        )
+        
+        # Normaliser entre 0 et 1, puis convertir en pourcentage
+        confidence_percentage = min(0.98, weighted_confidence)
+        
+        # Stocker la confiance finale dans la prédiction
+        prediction["confidence"] = confidence_percentage
+        
+        return prediction
 
-   def generate_match_predictions(self, match_id, markets, league_name):
-       """
-       Génère toutes les prédictions possibles pour un match spécifique,
-       calcule leur confiance et les trie par niveau de confiance.
-       """
-       # Récupérer les cotes de base pour déterminer si on propose des doubles chances
-       basic_odds = self.get_teams_basic_odds(markets)
-       
-       # Liste des prédictions possibles
-       all_predictions = []
-       
-       # 1. Under 3.5 buts
-       prediction = self.find_under_35_goals(markets)
-       if prediction:
-           prediction_with_confidence = self.calculate_prediction_confidence(prediction, league_name)
-           if prediction_with_confidence:
-               all_predictions.append(prediction_with_confidence)
-       
-       # 2. Under 4.5 buts
-       prediction = self.find_under_45_goals(markets)
-       if prediction:
-           prediction_with_confidence = self.calculate_prediction_confidence(prediction, league_name)
-           if prediction_with_confidence:
-               all_predictions.append(prediction_with_confidence)
-       
-       # 3. Over 1.5 buts
-       prediction = self.find_over_15_goals(markets)
-       if prediction:
-           prediction_with_confidence = self.calculate_prediction_confidence(prediction, league_name)
-           if prediction_with_confidence:
-               all_predictions.append(prediction_with_confidence)
-       
-       # 4. Double Chance 1X (uniquement si cote élevée)
-       prediction = self.find_double_chance_1X(markets, basic_odds)
-       if prediction:
-           prediction_with_confidence = self.calculate_prediction_confidence(prediction, league_name)
-           if prediction_with_confidence:
-               all_predictions.append(prediction_with_confidence)
-       
-       # 5. Double Chance X2 (uniquement si cote élevée)
-       prediction = self.find_double_chance_X2(markets, basic_odds)
-       if prediction:
-           prediction_with_confidence = self.calculate_prediction_confidence(prediction, league_name)
-           if prediction_with_confidence:
-               all_predictions.append(prediction_with_confidence)
-       
-       # Trier les prédictions par niveau de confiance (décroissant)
-       all_predictions.sort(key=lambda x: x["confidence"], reverse=True)
-       
-       return all_predictions
-   
-   def generate_predictions(self):
-       """
-       Génère les meilleures prédictions pour les matchs sélectionnés 
-       en choisissant la prédiction la plus fiable pour chaque match.
-       """
-       logger.info("=== GÉNÉRATION DES PRÉDICTIONS ===")
-       
-       # Liste des types de prédictions déjà utilisés
-       used_prediction_types = []
-       
-       # Pour chaque match
-       for match in self.selected_matches:
-           match_id = match.get("id")
-           home_team = match.get("home_team", "Équipe domicile")
-           away_team = match.get("away_team", "Équipe extérieur")
-           league_name = match.get("league", "Ligue inconnue")
-           
-           logger.info(f"Analyse du match {home_team} vs {away_team} (ID: {match_id})...")
-           
-           # Récupérer les cotes pour ce match
-           markets = self.get_match_odds(match_id)
-           
-           if not markets:
-               logger.warning(f"Pas de cotes disponibles pour {home_team} vs {away_team}, match ignoré")
-               continue
-           
-           # Générer toutes les prédictions possibles pour ce match
-           all_predictions = self.generate_match_predictions(match_id, markets, league_name)
-           
-           # Si aucune prédiction n'a été trouvée, passer au match suivant
-           if not all_predictions:
-               logger.warning(f"Aucune prédiction fiable trouvée pour {home_team} vs {away_team}")
-               continue
-           
-           # Sélectionner la meilleure prédiction en évitant les doublons
-           selected_prediction = None
-           
-           # Essayer d'abord avec la prédiction de plus haute confiance
-           for prediction in all_predictions:
-               prediction_type = prediction["type"]
-               
-               # Si ce type de prédiction n'est pas déjà utilisé, le sélectionner
-               if prediction_type not in used_prediction_types:
-                   selected_prediction = prediction
-                   used_prediction_types.append(prediction_type)
-                   break
-           
-           # Si toutes les prédictions avec haute confiance sont déjà utilisées,
-           # accepter un doublon pour les prédictions under dans les ligues à faible scoring
-           if not selected_prediction and self.is_low_scoring_league(league_name):
-               for prediction in all_predictions:
-                   prediction_type = prediction["type"]
-                   
-                   # Accepter les under goals comme répétitions pour les ligues à faible scoring
-                   if prediction_type == "-3.5 buts" or prediction_type == "-4.5 buts":
-                       selected_prediction = prediction
-                       break
-           
-           # Si toujours pas de prédiction, prendre la prédiction de plus haute confiance
-           # même si elle est déjà utilisée
-           if not selected_prediction and all_predictions:
-               selected_prediction = all_predictions[0]
-               
-           # Si une prédiction a été trouvée
-           if selected_prediction:
-               # Ajouter les informations du match
-               selected_prediction["match_id"] = match_id
-               selected_prediction["home_team"] = home_team
-               selected_prediction["away_team"] = away_team
-               selected_prediction["league_name"] = league_name
-               selected_prediction["start_timestamp"] = match.get("start_timestamp", 0)
-               
-               # Stocker la prédiction
-               self.predictions[match_id] = selected_prediction
-               
-               logger.info(f"  Prédiction pour {home_team} vs {away_team}: {selected_prediction['type']} (Cote: {selected_prediction['odds']}, Confiance: {selected_prediction['confidence']:.2f})")
-           else:
-               logger.warning(f"Aucune prédiction fiable trouvée pour {home_team} vs {away_team}")
-       
-       # Calculer la cote totale du coupon
-       if self.predictions:
-           self.coupon_total_odds = 1.0
-           for match_id, pred in self.predictions.items():
-               self.coupon_total_odds *= pred["odds"]
-           self.coupon_total_odds = round(self.coupon_total_odds, 2)
-       
-       logger.info(f"Prédictions générées pour {len(self.predictions)} match(s) avec une cote totale de {self.coupon_total_odds}")
-   
-   def format_prediction_message(self):
-       """Formate le message de prédiction pour Telegram avec mise en forme Markdown améliorée."""
-       now = datetime.now(self.timezone)
-       date_str = now.strftime("%d/%m/%Y")
-       
-       # Titre en gras avec émojis
-       message = "🔮 *COUPON DU JOUR* 🔮\n"
-       message += f"📅 *{date_str}*\n\n"
-       
-       # Si aucune prédiction n'a été générée
-       if not self.predictions:
-           message += "_Aucune prédiction fiable n'a pu être générée pour aujourd'hui. Revenez demain!_"
-           return message
-       
-       # Ajouter chaque prédiction au message
-       for i, (match_id, pred) in enumerate(self.predictions.items()):
-           # Séparateur
-           if i > 0:
-               message += "----------------------------\n\n"
-           
-           # Calculer l'heure du match au format local
-           start_time = datetime.fromtimestamp(pred["start_timestamp"], self.timezone).strftime("%H:%M")
-           
-           # Nom de la ligue en MAJUSCULES
-           message += f"🏆 *{pred['league_name'].upper()}*\n"
-           
-           # Équipes sur une ligne
-           message += f"⚽️ *{pred['home_team']} vs {pred['away_team']}*\n"
-           
-           # Heure sur une nouvelle ligne
-           message += f"⏰ Heure: {start_time}\n"
-           
-           # Prédiction en gras et plus visible
-           message += f"🎯 *PRÉDICTION: {pred['type']}*\n"
-           
-           # Cote
-           message += f"💰 Cote: {pred['odds']}\n"
-       
-       # Ajouter la cote totale en gras
-       message += f"----------------------------\n\n"
-       message += f"📊 *COTE TOTALE: {self.coupon_total_odds}*\n\n"
-       
-       # Conseils en italique
-       message += f"💡 _Misez toujours 5% de votre capital_\n"
-       message += f"🔞 _Pariez de façon responsable._"
-       
-       return message
-   
-   def send_to_telegram(self, message):
-       """Envoie un message sur le canal Telegram."""
-       url = f"https://api.telegram.org/bot{self.telegram_bot_token}/sendMessage"
-       
-       try:
-           data = {
-               "chat_id": self.telegram_channel_id,
-               "text": message,
-               "parse_mode": "Markdown"
-           }
-           
-           response = requests.post(url, data=data)
-           
-           if response.status_code == 200:
-               logger.info("Message envoyé avec succès sur Telegram")
-               return True
-           else:
-               logger.error(f"Erreur lors de l'envoi du message sur Telegram: {response.text}")
-               return False
-               
-       except Exception as e:
-           logger.error(f"Exception lors de l'envoi du message sur Telegram: {str(e)}")
-           return False
-   
-   def send_predictions_to_telegram(self):
-       """Envoie les prédictions sur le canal Telegram."""
-       message = self.format_prediction_message()
-       
-       logger.info("Envoi des prédictions sur Telegram...")
-       success = self.send_to_telegram(message)
-       
-       if success:
-           logger.info("Prédictions envoyées avec succès")
-       else:
-           logger.error("Échec de l'envoi des prédictions")
+    def generate_match_predictions(self, match_id, markets, league_name):
+        """
+        Génère toutes les prédictions possibles pour un match spécifique,
+        calcule leur confiance et les trie par niveau de confiance.
+        """
+        # Récupérer les cotes de base pour déterminer si on propose des doubles chances
+        basic_odds = self.get_teams_basic_odds(markets)
+        
+        # Liste des prédictions possibles
+        all_predictions = []
+        
+        # 1. Under 3.5 buts
+        prediction = self.find_under_35_goals(markets)
+        if prediction:
+            prediction_with_confidence = self.calculate_prediction_confidence(prediction, league_name)
+            if prediction_with_confidence:
+                all_predictions.append(prediction_with_confidence)
+        
+        # 2. Under 4.5 buts
+        prediction = self.find_under_45_goals(markets)
+        if prediction:
+            prediction_with_confidence = self.calculate_prediction_confidence(prediction, league_name)
+            if prediction_with_confidence:
+                all_predictions.append(prediction_with_confidence)
+        
+        # 3. Over 1.5 buts
+        prediction = self.find_over_15_goals(markets)
+        if prediction:
+            prediction_with_confidence = self.calculate_prediction_confidence(prediction, league_name)
+            if prediction_with_confidence:
+                all_predictions.append(prediction_with_confidence)
+        
+        # 4. Double Chance 1X (uniquement si cote élevée)
+        prediction = self.find_double_chance_1X(markets, basic_odds)
+        if prediction:
+            prediction_with_confidence = self.calculate_prediction_confidence(prediction, league_name)
+            if prediction_with_confidence:
+                all_predictions.append(prediction_with_confidence)
+        
+        # 5. Double Chance X2 (uniquement si cote élevée)
+        prediction = self.find_double_chance_X2(markets, basic_odds)
+        if prediction:
+            prediction_with_confidence = self.calculate_prediction_confidence(prediction, league_name)
+            if prediction_with_confidence:
+                all_predictions.append(prediction_with_confidence)
+        
+        # Trier les prédictions par niveau de confiance (décroissant)
+        all_predictions.sort(key=lambda x: x["confidence"], reverse=True)
+        
+        return all_predictions
+    
+    def generate_predictions(self):
+        """
+        Génère les meilleures prédictions pour les matchs sélectionnés 
+        en choisissant la prédiction la plus fiable pour chaque match.
+        """
+        logger.info("=== GÉNÉRATION DES PRÉDICTIONS ===")
+        
+        # Liste des types de prédictions déjà utilisés
+        used_prediction_types = []
+        
+        # Pour chaque match
+        for match in self.selected_matches:
+            match_id = match.get("id")
+            home_team = match.get("home_team", "Équipe domicile")
+            away_team = match.get("away_team", "Équipe extérieur")
+            league_name = match.get("league", "Ligue inconnue")
+            
+            logger.info(f"Analyse du match {home_team} vs {away_team} (ID: {match_id})...")
+            
+            # Récupérer les cotes pour ce match
+            markets = self.get_match_odds(match_id)
+            
+            if not markets:
+                logger.warning(f"Pas de cotes disponibles pour {home_team} vs {away_team}, match ignoré")
+                continue
+            
+            # Générer toutes les prédictions possibles pour ce match
+            all_predictions = self.generate_match_predictions(match_id, markets, league_name)
+            
+            # Si aucune prédiction n'a été trouvée, passer au match suivant
+            if not all_predictions:
+                logger.warning(f"Aucune prédiction fiable trouvée pour {home_team} vs {away_team}")
+                continue
+            
+            # Sélectionner la meilleure prédiction en évitant les doublons
+            selected_prediction = None
+            
+            # Essayer d'abord avec la prédiction de plus haute confiance
+            for prediction in all_predictions:
+                prediction_type = prediction["type"]
+                
+                # Si ce type de prédiction n'est pas déjà utilisé, le sélectionner
+                if prediction_type not in used_prediction_types:
+                    selected_prediction = prediction
+                    used_prediction_types.append(prediction_type)
+                    break
+            
+            # Si toutes les prédictions avec haute confiance sont déjà utilisées,
+            # accepter un doublon pour les prédictions under dans les ligues à faible scoring
+            if not selected_prediction and self.is_low_scoring_league(league_name):
+                for prediction in all_predictions:
+                    prediction_type = prediction["type"]
+                    
+                    # Accepter les under goals comme répétitions pour les ligues à faible scoring
+                    if prediction_type == "-3.5 buts" or prediction_type == "-4.5 buts":
+                        selected_prediction = prediction
+                        break
+            
+            # Si toujours pas de prédiction, prendre la prédiction de plus haute confiance
+            # même si elle est déjà utilisée
+            if not selected_prediction and all_predictions:
+                selected_prediction = all_predictions[0]
+                
+            # Si une prédiction a été trouvée
+            if selected_prediction:
+                # Ajouter les informations du match
+                selected_prediction["match_id"] = match_id
+                selected_prediction["home_team"] = home_team
+                selected_prediction["away_team"] = away_team
+                selected_prediction["league_name"] = league_name
+                selected_prediction["start_timestamp"] = match.get("start_timestamp", 0)
+                
+                # Stocker la prédiction
+                self.predictions[match_id] = selected_prediction
+                
+                logger.info(f"  Prédiction pour {home_team} vs {away_team}: {selected_prediction['type']} (Cote: {selected_prediction['odds']}, Confiance: {selected_prediction['confidence']:.2f})")
+            else:
+                logger.warning(f"Aucune prédiction fiable trouvée pour {home_team} vs {away_team}")
+        
+        # Calculer la cote totale du coupon
+        if self.predictions:
+            self.coupon_total_odds = 1.0
+            for match_id, pred in self.predictions.items():
+                self.coupon_total_odds *= pred["odds"]
+            self.coupon_total_odds = round(self.coupon_total_odds, 2)
+        
+        logger.info(f"Prédictions générées pour {len(self.predictions)} match(s) avec une cote totale de {self.coupon_total_odds}")
+    
+    def format_prediction_message(self):
+        """Formate le message de prédiction pour Telegram avec mise en forme Markdown améliorée."""
+        now = datetime.now(self.timezone)
+        date_str = now.strftime("%d/%m/%Y")
+        
+        # Titre en gras avec émojis
+        message = "🔮 *COUPON DU JOUR* 🔮\n"
+        message += f"📅 *{date_str}*\n\n"
+        
+        # Si aucune prédiction n'a été générée
+        if not self.predictions:
+            message += "_Aucune prédiction fiable n'a pu être générée pour aujourd'hui. Revenez demain!_"
+            return message
+        
+        # Ajouter chaque prédiction au message
+        for i, (match_id, pred) in enumerate(self.predictions.items()):
+            # Séparateur
+            if i > 0:
+                message += "----------------------------\n\n"
+            
+            # Calculer l'heure du match au format local
+            start_time = datetime.fromtimestamp(pred["start_timestamp"], self.timezone).strftime("%H:%M")
+            
+            # Nom de la ligue en MAJUSCULES
+            message += f"🏆 *{pred['league_name'].upper()}*\n"
+            
+            # Équipes sur une ligne
+            message += f"⚽️ *{pred['home_team']} vs {pred['away_team']}*\n"
+            
+            # Heure sur une nouvelle ligne
+            message += f"⏰ Heure: {start_time}\n"
+            
+            # Prédiction en gras et plus visible
+            message += f"🎯 *PRÉDICTION: {pred['type']}*\n"
+            
+            # Cote
+            message += f"💰 Cote: {pred['odds']}\n"
+        
+        # Ajouter la cote totale en gras
+        message += f"----------------------------\n\n"
+        message += f"📊 *COTE TOTALE: {self.coupon_total_odds}*\n\n"
+        
+        # Conseils en italique
+        message += f"💡 _Misez toujours 5% de votre capital_\n"
+        message += f"🔞 _Pariez de façon responsable._"
+        
+        return message
+    
+    def send_to_telegram(self, message):
+        """Envoie un message sur le canal Telegram."""
+        url = f"https://api.telegram.org/bot{self.telegram_bot_token}/sendMessage"
+        
+        try:
+            data = {
+                "chat_id": self.telegram_channel_id,
+                "text": message,
+                "parse_mode": "Markdown"
+            }
+            
+            response = requests.post(url, data=data)
+            
+            if response.status_code == 200:
+                logger.info("Message envoyé avec succès sur Telegram")
+                return True
+            else:
+                logger.error(f"Erreur lors de l'envoi du message sur Telegram: {response.text}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Exception lors de l'envoi du message sur Telegram: {str(e)}")
+            return False
+    
+    def send_predictions_to_telegram(self):
+        """Envoie les prédictions sur le canal Telegram."""
+        message = self.format_prediction_message()
+        
+        logger.info("Envoi des prédictions sur Telegram...")
+        success = self.send_to_telegram(message)
+        
+        if success:
+            logger.info("Prédictions envoyées avec succès")
+        else:
+            logger.error("Échec de l'envoi des prédictions")
 
 # Point d'entrée principal
 if __name__ == "__main__":
-   try:
-       bot = FootballPredictionBot()
-       bot.schedule_daily_job()
-   except Exception as e:
-       logger.critical(f"Erreur fatale: {str(e)}")
-       # Afficher la trace complète de l'erreur pour faciliter le débogage
-       import traceback
-       logger.critical(traceback.format_exc())
+    try:
+        bot = FootballPredictionBot()
+        bot.schedule_daily_job()
+    except Exception as e:
+        logger.critical(f"Erreur fatale: {str(e)}")
+        # Afficher la trace complète de l'erreur pour faciliter le débogage
+        import traceback
+        logger.critical(traceback.format_exc())
