@@ -91,6 +91,10 @@ class FootballPredictionBot:
             "double_chance_1X": 0.85,
             "double_chance_X2": 0.80
         }
+        
+        # Paramètres de validation des équipes
+        self.invalid_team_names = ["home", "away", "Home", "Away", "HOME", "AWAY", "1", "2", "X"]
+        self.min_team_name_length = 3
     
     def _check_env_variables(self):
         """Vérifie que toutes les variables d'environnement requises sont définies."""
@@ -109,6 +113,26 @@ class FootballPredictionBot:
             error_msg = f"Variables d'environnement manquantes: {', '.join(missing_vars)}"
             logger.error(error_msg)
             raise EnvironmentError(error_msg)
+    
+    def is_valid_team_name(self, team_name):
+        """
+        Vérifie si le nom d'une équipe est valide.
+        
+        Règles:
+        - Ne doit pas être vide
+        - Ne doit pas être dans la liste des noms invalides (home, away, etc.)
+        - Doit avoir une longueur minimale
+        """
+        if not team_name:
+            return False
+            
+        if team_name.strip() in self.invalid_team_names:
+            return False
+            
+        if len(team_name.strip()) < self.min_team_name_length:
+            return False
+            
+        return True
     
     def schedule_daily_job(self):
         """Programme l'exécution quotidienne à 7h00 (heure d'Afrique centrale)."""
@@ -237,9 +261,16 @@ class FootballPredictionBot:
                             match.get("league") and 
                             match.get("id")):
                             
-                            # Ajouter le match à notre liste
-                            all_matches.append(match)
-                            league_matches_count += 1
+                            # NOUVELLE VÉRIFICATION: Vérifier que les noms d'équipes sont valides
+                            home_team = match.get("home_team")
+                            away_team = match.get("away_team")
+                            
+                            if self.is_valid_team_name(home_team) and self.is_valid_team_name(away_team):
+                                # Ajouter le match à notre liste
+                                all_matches.append(match)
+                                league_matches_count += 1
+                            else:
+                                logger.warning(f"Match ignoré - noms d'équipes invalides: {home_team} vs {away_team}")
             
             if league_matches_count > 0:
                 logger.info(f"Trouvé {league_matches_count} match(s) à venir pour aujourd'hui dans league_id={league_id}")
@@ -584,6 +615,7 @@ class FootballPredictionBot:
             odds_confidence = max(0.6, min(0.92, odds_confidence))
             
             # Calculer la stabilité
+            # Calculer la stabilité
             avg_1X_odds = 1.50  # Cote moyenne fictive pour 1X
             stability = 1.0 - min(1.0, abs(best_odds - avg_1X_odds) / avg_1X_odds)
             
@@ -765,6 +797,11 @@ class FootballPredictionBot:
             away_team = match.get("away_team", "Équipe extérieur")
             league_name = match.get("league", "Ligue inconnue")
             
+            # VÉRIFICATION SUPPLÉMENTAIRE des noms d'équipes
+            if not self.is_valid_team_name(home_team) or not self.is_valid_team_name(away_team):
+                logger.warning(f"Match ignoré - noms d'équipes invalides: {home_team} vs {away_team}")
+                continue
+                
             logger.info(f"Analyse du match {home_team} vs {away_team} (ID: {match_id})...")
             
             # Récupérer les cotes pour ce match
@@ -781,6 +818,16 @@ class FootballPredictionBot:
             if not all_predictions:
                 logger.warning(f"Aucune prédiction fiable trouvée pour {home_team} vs {away_team}")
                 continue
+            
+            # NOUVELLE VÉRIFICATION: Vérifier qu'aucune cote n'est trop élevée (supérieure à self.max_odds)
+            valid_predictions = [p for p in all_predictions if p.get("odds", 0) <= self.max_odds]
+            
+            if not valid_predictions:
+                logger.warning(f"Toutes les cotes pour {home_team} vs {away_team} sont trop élevées, match ignoré")
+                continue
+                
+            # Mettre à jour la liste avec uniquement les prédictions valides
+            all_predictions = valid_predictions
             
             # Sélectionner la meilleure prédiction en évitant les doublons
             selected_prediction = None
