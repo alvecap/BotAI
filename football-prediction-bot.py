@@ -45,7 +45,7 @@ class FootballPredictionBot:
         self.timezone = pytz.timezone('Africa/Brazzaville')
         
         # Paramètres des prédictions
-        self.min_odds = 1.10  # Cote minimale pour les prédictions (modifié à 1.10)
+        self.min_odds = 1.10  # Cote minimale pour les prédictions
         self.max_odds = 10.0  # Cote maximale pour éviter les paris trop risqués
         
         # Seuil pour considérer une cote comme "élevée" pour les doubles chances
@@ -90,10 +90,10 @@ class FootballPredictionBot:
         self.base_confidence = {
             "under_35_goals": 0.80,
             "over_15_goals": 0.75,
-            "over_25_goals": 0.70,      # Nouveau
-            "both_teams_to_score": 0.75, # Nouveau
-            "win_home": 0.65,            # Nouveau
-            "win_away": 0.60,            # Nouveau
+            "over_25_goals": 0.70,      
+            "both_teams_to_score": 0.75, 
+            "win_home": 0.65,            
+            "win_away": 0.60,            
             "double_chance_1X": 0.85,
             "double_chance_X2": 0.80
         }
@@ -104,18 +104,23 @@ class FootballPredictionBot:
         
         # Cotes moyennes attendues pour chaque type de prédiction (pour la stabilité)
         self.average_expected_odds = {
-            "under_35_goals": 1.45,
-            "over_15_goals": 1.30,       # Corrigé à une valeur plus réaliste
-            "over_25_goals": 1.70,       # Nouveau
-            "both_teams_to_score": 1.80, # Nouveau
-            "win_home": 2.10,            # Nouveau
-            "win_away": 2.50,            # Nouveau
-            "double_chance_1X": 1.50,
-            "double_chance_X2": 1.75
+            "under_35_goals": 1.85,       # Mise à jour avec des valeurs réalistes
+            "over_15_goals": 1.07,        # Mise à jour avec des valeurs réalistes
+            "over_25_goals": 1.32,        # Mise à jour avec des valeurs réalistes
+            "both_teams_to_score": 2.71,  # Mise à jour avec des valeurs réalistes
+            "win_home": 18.5,             # Mise à jour avec des valeurs réalistes
+            "win_away": 1.051,            # Mise à jour avec des valeurs réalistes
+            "double_chance_1X": 6.35,     # Mise à jour avec des valeurs réalistes
+            "double_chance_X2": 1.002     # Mise à jour avec des valeurs réalistes
         }
         
-        # Historique des équipes (pour évaluer les formes)
-        self.team_forms = {}
+        # Identifiants des marchés couramment utilisés
+        self.market_ids = {
+            "1x2": ["1"],
+            "total": ["17", "99"],
+            "btts": ["19"],
+            "double_chance": ["8"]
+        }
     
     def _check_env_variables(self):
         """Vérifie que toutes les variables d'environnement requises sont définies."""
@@ -412,6 +417,8 @@ class FootballPredictionBot:
             logger.warning(f"Impossible de récupérer les cotes pour le match ID: {match_id}")
             return None
         
+        # Maintenant, nous adaptons le traitement selon le format de l'API
+        # qui renvoie les données dans un format différent (voir exemple du document)
         return response.get("data", {})
 
     def get_teams_basic_odds(self, markets):
@@ -420,23 +427,20 @@ class FootballPredictionBot:
         draw_odds = None
         away_odds = None
         
-        # Rechercher le marché 1X2
-        for market_id, market in markets.items():
-            market_name = market.get("name", "").lower()
-            
-            if market_name == "1x2" or market_name == "match result":
+        # Rechercher le marché 1X2 (maintenant ID "1" selon l'exemple)
+        if "1" in markets:
+            market = markets["1"]
+            if market.get("name", "").lower() == "1x2":
                 for outcome in market.get("outcomes", []):
                     name = outcome.get("name", "").lower()
                     odds = outcome.get("odds")
                     
-                    if ("home" in name or "1" == name) and odds:
+                    if "home" in name and odds:
                         home_odds = odds
-                    elif ("draw" in name or "x" == name) and odds:
+                    elif "draw" in name and odds:
                         draw_odds = odds
-                    elif ("away" in name or "2" == name) and odds:
+                    elif "away" in name and odds:
                         away_odds = odds
-                
-                break
         
         return {
             "home": home_odds,
@@ -458,23 +462,36 @@ class FootballPredictionBot:
         # Stocker toutes les cotes trouvées pour pouvoir les vérifier
         found_odds = []
         
-        for market_id, market in markets.items():
-            market_name = market.get("name", "").lower()
-            
-            if "total" in market_name and "team" not in market_name:
+        # Selon l'exemple, ID "17" pour les totaux
+        if "17" in markets:
+            market = markets["17"]
+            if "total" in market.get("name", "").lower():
                 for outcome in market.get("outcomes", []):
                     name = outcome.get("name", "").lower()
                     odds = outcome.get("odds")
                     
                     if "under" in name and "3.5" in name and odds:
-                        # Vérifier que les cotes sont dans notre plage et ajouter à la liste
+                        # Vérifier que les cotes sont dans notre plage
                         if self.min_odds <= odds <= self.max_odds:
-                            found_odds.append({"odds": odds, "market_name": market_name})
+                            found_odds.append({"odds": odds, "name": name})
         
-        # Si plusieurs cotes sont trouvées, prendre celle du marché principal
+        # Vérifier aussi dans Asian Total (ID "99")
+        if "99" in markets:
+            market = markets["99"]
+            if "asian total" in market.get("name", "").lower():
+                for outcome in market.get("outcomes", []):
+                    name = outcome.get("name", "").lower()
+                    odds = outcome.get("odds")
+                    
+                    if "under" in name and "3.5" in name and odds:
+                        # Vérifier que les cotes sont dans notre plage
+                        if self.min_odds <= odds <= self.max_odds:
+                            found_odds.append({"odds": odds, "name": name})
+        
+        # Si plusieurs cotes sont trouvées, prendre la plus fiable
         if found_odds:
-            # Trier d'abord par nom de marché (préférer "total" simple) puis par cote (préférer la plus fiable)
-            found_odds.sort(key=lambda x: (0 if x["market_name"] == "total" else 1, abs(x["odds"] - self.average_expected_odds["under_35_goals"])))
+            # Trier par proximité avec la cote moyenne attendue
+            found_odds.sort(key=lambda x: abs(x["odds"] - self.average_expected_odds["under_35_goals"]))
             
             # Prendre la meilleure cote
             best_odds = found_odds[0]["odds"]
@@ -503,27 +520,26 @@ class FootballPredictionBot:
             "stability": 0
         }
         
-        # Stocker toutes les cotes trouvées pour pouvoir les vérifier
+        # Stocker toutes les cotes trouvées
         found_odds = []
         
-        for market_id, market in markets.items():
-            market_name = market.get("name", "").lower()
-            
-            if "total" in market_name and "team" not in market_name:
+        # Selon l'exemple, ID "17" pour les totaux
+        if "17" in markets:
+            market = markets["17"]
+            if "total" in market.get("name", "").lower():
                 for outcome in market.get("outcomes", []):
                     name = outcome.get("name", "").lower()
                     odds = outcome.get("odds")
                     
                     if "over" in name and "1.5" in name and odds:
-                        # CORRECTION IMPORTANTE: Vérifier que les cotes sont valides et exactes
-                        # Ignorer les cotes trop petites ou trop grandes
+                        # Vérifier que les cotes sont dans notre plage
                         if self.min_odds <= odds <= self.max_odds:
-                            found_odds.append({"odds": odds, "market_name": market_name})
+                            found_odds.append({"odds": odds, "name": name})
         
-        # Si plusieurs cotes sont trouvées, prendre celle du marché principal
+        # Si plusieurs cotes sont trouvées, prendre la plus fiable
         if found_odds:
-            # Trier d'abord par nom de marché (préférer "total" simple) puis par cote (préférer la plus fiable)
-            found_odds.sort(key=lambda x: (0 if x["market_name"] == "total" else 1, abs(x["odds"] - self.average_expected_odds["over_15_goals"])))
+            # Trier par proximité avec la cote moyenne attendue
+            found_odds.sort(key=lambda x: abs(x["odds"] - self.average_expected_odds["over_15_goals"]))
             
             # Prendre la meilleure cote
             best_odds = found_odds[0]["odds"]
@@ -552,26 +568,26 @@ class FootballPredictionBot:
             "stability": 0
         }
         
-        # Stocker toutes les cotes trouvées pour pouvoir les vérifier
+        # Stocker toutes les cotes trouvées
         found_odds = []
         
-        for market_id, market in markets.items():
-            market_name = market.get("name", "").lower()
-            
-            if "total" in market_name and "team" not in market_name:
+        # Vérifier dans ID "17" (Total)
+        if "17" in markets:
+            market = markets["17"]
+            if "total" in market.get("name", "").lower():
                 for outcome in market.get("outcomes", []):
                     name = outcome.get("name", "").lower()
                     odds = outcome.get("odds")
                     
                     if "over" in name and "2.5" in name and odds:
-                        # Vérifier que les cotes sont dans notre plage et ajouter à la liste
+                        # Vérifier que les cotes sont dans notre plage
                         if self.min_odds <= odds <= self.max_odds:
-                            found_odds.append({"odds": odds, "market_name": market_name})
+                            found_odds.append({"odds": odds, "name": name})
         
-        # Si plusieurs cotes sont trouvées, prendre celle du marché principal
+        # Si plusieurs cotes sont trouvées, prendre la plus fiable
         if found_odds:
-            # Trier d'abord par nom de marché (préférer "total" simple) puis par cote (préférer la plus fiable)
-            found_odds.sort(key=lambda x: (0 if x["market_name"] == "total" else 1, abs(x["odds"] - self.average_expected_odds["over_25_goals"])))
+            # Trier par proximité avec la cote moyenne attendue
+            found_odds.sort(key=lambda x: abs(x["odds"] - self.average_expected_odds["over_25_goals"]))
             
             # Prendre la meilleure cote
             best_odds = found_odds[0]["odds"]
@@ -600,25 +616,24 @@ class FootballPredictionBot:
             "stability": 0
         }
         
-        # Stocker toutes les cotes trouvées pour pouvoir les vérifier
+        # Stocker toutes les cotes trouvées
         found_odds = []
         
-        for market_id, market in markets.items():
-            market_name = market.get("name", "").lower()
-            
-            # Chercher le marché "both teams to score", "btts", etc.
-            if ("both" in market_name and "score" in market_name) or "btts" in market_name or "goal/no goal" in market_name:
+        # Vérifier dans ID "19" (Both Teams To Score)
+        if "19" in markets:
+            market = markets["19"]
+            if "both teams to score" in market.get("name", "").lower():
                 for outcome in market.get("outcomes", []):
                     name = outcome.get("name", "").lower()
                     odds = outcome.get("odds")
                     
-                    # Chercher "yes", "both", "goal", etc.
-                    if ("yes" in name or "both" in name or "goal" in name) and odds:
+                    # Chercher "yes" pour les deux équipes marquent
+                    if "yes" in name and odds:
                         # Vérifier que les cotes sont dans notre plage
                         if self.min_odds <= odds <= self.max_odds:
-                            found_odds.append({"odds": odds, "market_name": market_name})
+                            found_odds.append({"odds": odds, "name": name})
         
-        # Si plusieurs cotes sont trouvées, prendre la plus fiable
+        # Si des cotes sont trouvées, prendre la plus fiable
         if found_odds:
             # Trier par proximité avec la cote moyenne attendue
             found_odds.sort(key=lambda x: abs(x["odds"] - self.average_expected_odds["both_teams_to_score"]))
@@ -650,9 +665,8 @@ class FootballPredictionBot:
         if not home_odds or home_odds < self.min_odds or home_odds > self.max_odds:
             return None
         
-        # Critères stricts: l'équipe doit être en forme (vérification supplémentaire qu'on pourrait développer)
-        # et la cote doit être attrayante
-        if home_odds < 1.30 or home_odds > 3.0:  # Victoire trop évidente ou trop improbable
+        # Vérifier si c'est une cote attrayante (pas trop basse ni trop haute)
+        if home_odds < 1.30 or home_odds > 5.0:  # Ajusté selon les conditions demandées
             return None
             
         result = {
@@ -664,7 +678,7 @@ class FootballPredictionBot:
         
         # Calculer la confiance basée sur les cotes (inversement proportionnelle)
         # Plus la cote est basse, plus on est confiant
-        odds_confidence = 1.0 - ((home_odds - self.min_odds) / (3.0 - self.min_odds))
+        odds_confidence = 1.0 - ((home_odds - self.min_odds) / (5.0 - self.min_odds))
         odds_confidence = max(0.60, min(0.85, odds_confidence))
         
         # Calculer la stabilité
@@ -685,9 +699,8 @@ class FootballPredictionBot:
         if not away_odds or away_odds < self.min_odds or away_odds > self.max_odds:
             return None
         
-        # Critères stricts: l'équipe doit être en forme (vérification supplémentaire qu'on pourrait développer)
-        # et la cote doit être attrayante
-        if away_odds < 1.40 or away_odds > 3.5:  # Victoire trop évidente ou trop improbable
+        # Vérifier si c'est une cote attrayante (pas trop basse ni trop haute)
+        if away_odds < 1.30 or away_odds > 5.0:  # Ajusté selon les conditions demandées
             return None
             
         result = {
@@ -698,7 +711,7 @@ class FootballPredictionBot:
         }
         
         # Calculer la confiance basée sur les cotes (inversement proportionnelle)
-        odds_confidence = 1.0 - ((away_odds - self.min_odds) / (3.5 - self.min_odds))
+        odds_confidence = 1.0 - ((away_odds - self.min_odds) / (5.0 - self.min_odds))
         odds_confidence = max(0.55, min(0.80, odds_confidence))
         
         # Calculer la stabilité
@@ -723,24 +736,24 @@ class FootballPredictionBot:
             "stability": 0
         }
         
-        # Stocker toutes les cotes trouvées pour pouvoir les vérifier
+        # Stocker toutes les cotes trouvées
         found_odds = []
         
-        for market_id, market in markets.items():
-            market_name = market.get("name", "").lower()
-            
-            if "double chance" in market_name:
+        # Vérifier dans ID "8" (Double Chance)
+        if "8" in markets:
+            market = markets["8"]
+            if "double chance" in market.get("name", "").lower():
                 for outcome in market.get("outcomes", []):
-                    name = outcome.get("name", "")
+                    name = outcome.get("name", "").lower()
                     odds = outcome.get("odds")
                     
-                    # On cherche 1X, Home Or X, HOME Or X, etc.
-                    if ("1X" in name or "HOME Or X" in name or "HOME or X" in name or "home or x" in name) and odds:
-                        # Vérifier que les cotes sont dans notre plage et ajouter à la liste
+                    # On cherche "home or x"
+                    if "home or x" in name and odds:
+                        # Vérifier que les cotes sont dans notre plage
                         if self.min_odds <= odds <= self.max_odds:
                             found_odds.append({"odds": odds, "name": name})
         
-        # Si plusieurs cotes sont trouvées, prendre la plus fiable
+        # Si des cotes sont trouvées, prendre la plus fiable
         if found_odds:
             # Trier par proximité avec la cote moyenne attendue
             found_odds.sort(key=lambda x: abs(x["odds"] - self.average_expected_odds["double_chance_1X"]))
@@ -776,24 +789,24 @@ class FootballPredictionBot:
             "stability": 0
         }
         
-        # Stocker toutes les cotes trouvées pour pouvoir les vérifier
+        # Stocker toutes les cotes trouvées
         found_odds = []
         
-        for market_id, market in markets.items():
-            market_name = market.get("name", "").lower()
-            
-            if "double chance" in market_name:
+        # Vérifier dans ID "8" (Double Chance)
+        if "8" in markets:
+            market = markets["8"]
+            if "double chance" in market.get("name", "").lower():
                 for outcome in market.get("outcomes", []):
-                    name = outcome.get("name", "")
+                    name = outcome.get("name", "").lower()
                     odds = outcome.get("odds")
                     
-                    # On cherche X2, Away Or X, AWAY Or X, etc.
-                    if ("X2" in name or "AWAY Or X" in name or "AWAY or X" in name or "away or x" in name) and odds:
-                        # Vérifier que les cotes sont dans notre plage et ajouter à la liste
+                    # On cherche "away or x"
+                    if "away or x" in name and odds:
+                        # Vérifier que les cotes sont dans notre plage
                         if self.min_odds <= odds <= self.max_odds:
                             found_odds.append({"odds": odds, "name": name})
         
-        # Si plusieurs cotes sont trouvées, prendre la plus fiable
+        # Si des cotes sont trouvées, prendre la plus fiable
         if found_odds:
             # Trier par proximité avec la cote moyenne attendue
             found_odds.sort(key=lambda x: abs(x["odds"] - self.average_expected_odds["double_chance_X2"]))
@@ -864,13 +877,36 @@ class FootballPredictionBot:
         
         return prediction
 
+    def log_available_markets(self, markets):
+        """Fonction de debug pour afficher tous les marchés disponibles"""
+        logger.info("=== MARCHÉS DISPONIBLES ===")
+        for market_id, market in markets.items():
+            market_name = market.get("name", "Sans nom")
+            logger.info(f"ID: {market_id}, Nom: {market_name}")
+            
+            # Afficher quelques exemples d'issues pour ce marché
+            for i, outcome in enumerate(market.get("outcomes", [])[:3]):
+                outcome_name = outcome.get("name", "Sans nom")
+                outcome_odds = outcome.get("odds", "?")
+                logger.info(f"  - Outcome {i+1}: {outcome_name}, Cote: {outcome_odds}")
+            
+            # S'il y a plus de 3 issues, afficher combien il en reste
+            if len(market.get("outcomes", [])) > 3:
+                remaining = len(market.get("outcomes", [])) - 3
+                logger.info(f"  + {remaining} autres issues...")
+
     def generate_match_predictions(self, match_id, markets, league_name):
         """
         Génère toutes les prédictions possibles pour un match spécifique,
         calcule leur confiance et les trie par niveau de confiance.
         """
+        # Debug: afficher les marchés disponibles
+        self.log_available_markets(markets)
+        
         # Récupérer les cotes de base pour plusieurs types de prédictions
         basic_odds = self.get_teams_basic_odds(markets)
+        
+        logger.info(f"Cotes de base: Home={basic_odds.get('home')}, Draw={basic_odds.get('draw')}, Away={basic_odds.get('away')}")
         
         # Liste des prédictions possibles
         all_predictions = []
@@ -889,28 +925,28 @@ class FootballPredictionBot:
             if prediction_with_confidence:
                 all_predictions.append(prediction_with_confidence)
         
-        # 3. Over 2.5 buts (NOUVEAU)
+        # 3. Over 2.5 buts
         prediction = self.find_over_25_goals(markets)
         if prediction:
             prediction_with_confidence = self.calculate_prediction_confidence(prediction, league_name)
             if prediction_with_confidence:
                 all_predictions.append(prediction_with_confidence)
         
-        # 4. Both Teams To Score (NOUVEAU)
+        # 4. Both Teams To Score
         prediction = self.find_both_teams_to_score(markets)
         if prediction:
             prediction_with_confidence = self.calculate_prediction_confidence(prediction, league_name)
             if prediction_with_confidence:
                 all_predictions.append(prediction_with_confidence)
         
-        # 5. Victoire domicile (NOUVEAU)
+        # 5. Victoire domicile
         prediction = self.find_win_home(markets, basic_odds)
         if prediction:
             prediction_with_confidence = self.calculate_prediction_confidence(prediction, league_name)
             if prediction_with_confidence:
                 all_predictions.append(prediction_with_confidence)
         
-        # 6. Victoire extérieur (NOUVEAU)
+        # 6. Victoire extérieur
         prediction = self.find_win_away(markets, basic_odds)
         if prediction:
             prediction_with_confidence = self.calculate_prediction_confidence(prediction, league_name)
@@ -933,6 +969,11 @@ class FootballPredictionBot:
         
         # Trier les prédictions par niveau de confiance (décroissant)
         all_predictions.sort(key=lambda x: x["confidence"], reverse=True)
+        
+        # Debug: afficher les prédictions trouvées
+        logger.info(f"Nombre de prédictions générées: {len(all_predictions)}")
+        for i, pred in enumerate(all_predictions):
+            logger.info(f"Prédiction {i+1}: {pred['type']}, Cote: {pred['odds']}, Confiance: {pred['confidence']:.2f}")
         
         return all_predictions
     
