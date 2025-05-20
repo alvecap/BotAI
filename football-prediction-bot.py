@@ -49,7 +49,7 @@ class FootballPredictionBot:
         self.max_odds = 10.0  # Cote maximale pour éviter les paris trop risqués
         
         # Seuil pour considérer une cote comme "élevée" pour les doubles chances
-        self.high_odds_threshold = 2.5
+        self.high_odds_threshold = 2.0  # Abaissé pour être plus sensible
         
         # Catégorisation des championnats par niveau de scoring
         self.low_scoring_leagues = [
@@ -67,14 +67,14 @@ class FootballPredictionBot:
         # Liste des IDs de ligue connus qui fonctionnent avec l'API
         self.league_ids = [1, 118, 148, 127, 110, 136, 251, 252, 253, 301, 302, 303, 304]
         
-        # Types de prédictions à considérer - MISE À JOUR avec les nouvelles prédictions
+        # Types de prédictions à considérer
         self.prediction_types = [
             "under_35_goals",      # -3.5 buts
             "over_15_goals",       # +1.5 buts
-            "over_25_goals",       # +2.5 buts (NOUVEAU)
-            "both_teams_to_score", # Les 2 équipes marquent (NOUVEAU)
-            "win_home",            # Victoire équipe domicile (NOUVEAU)
-            "win_away",            # Victoire équipe extérieur (NOUVEAU)
+            "over_25_goals",       # +2.5 buts
+            "both_teams_to_score", # Les 2 équipes marquent
+            "win_home",            # Victoire équipe domicile
+            "win_away",            # Victoire équipe extérieur
             "double_chance_1X",    # 1X
             "double_chance_X2"     # X2
         ]
@@ -104,22 +104,14 @@ class FootballPredictionBot:
         
         # Cotes moyennes attendues pour chaque type de prédiction (pour la stabilité)
         self.average_expected_odds = {
-            "under_35_goals": 1.85,       # Mise à jour avec des valeurs réalistes
-            "over_15_goals": 1.07,        # Mise à jour avec des valeurs réalistes
-            "over_25_goals": 1.32,        # Mise à jour avec des valeurs réalistes
-            "both_teams_to_score": 2.71,  # Mise à jour avec des valeurs réalistes
-            "win_home": 18.5,             # Mise à jour avec des valeurs réalistes
-            "win_away": 1.051,            # Mise à jour avec des valeurs réalistes
-            "double_chance_1X": 6.35,     # Mise à jour avec des valeurs réalistes
-            "double_chance_X2": 1.002     # Mise à jour avec des valeurs réalistes
-        }
-        
-        # Identifiants des marchés couramment utilisés
-        self.market_ids = {
-            "1x2": ["1"],
-            "total": ["17", "99"],
-            "btts": ["19"],
-            "double_chance": ["8"]
+            "under_35_goals": 1.85,
+            "over_15_goals": 1.07,
+            "over_25_goals": 1.32,
+            "both_teams_to_score": 2.71,
+            "win_home": 1.90,
+            "win_away": 2.50,
+            "double_chance_1X": 1.40,
+            "double_chance_X2": 1.60
         }
     
     def _check_env_variables(self):
@@ -197,6 +189,9 @@ class FootballPredictionBot:
             # Générer des prédictions
             if self.selected_matches:
                 self.generate_predictions()
+                
+                # Afficher un récapitulatif des prédictions dans la console
+                self.print_coupon_summary()
                 
                 # Envoyer le coupon sur Telegram
                 self.send_predictions_to_telegram()
@@ -417,8 +412,6 @@ class FootballPredictionBot:
             logger.warning(f"Impossible de récupérer les cotes pour le match ID: {match_id}")
             return None
         
-        # Maintenant, nous adaptons le traitement selon le format de l'API
-        # qui renvoie les données dans un format différent (voir exemple du document)
         return response.get("data", {})
 
     def get_teams_basic_odds(self, markets):
@@ -427,7 +420,7 @@ class FootballPredictionBot:
         draw_odds = None
         away_odds = None
         
-        # Rechercher le marché 1X2 (maintenant ID "1" selon l'exemple)
+        # Rechercher le marché 1X2 (ID "1")
         if "1" in markets:
             market = markets["1"]
             if market.get("name", "").lower() == "1x2":
@@ -449,7 +442,6 @@ class FootballPredictionBot:
         }
 
     # ============= MODÈLES DE CALCUL AVANCÉS POUR CHAQUE TYPE DE PRÉDICTION =============
-    
     def find_under_35_goals(self, markets):
         """Modèle de calcul pour la prédiction Under 3.5 buts."""
         result = {
@@ -462,7 +454,7 @@ class FootballPredictionBot:
         # Stocker toutes les cotes trouvées pour pouvoir les vérifier
         found_odds = []
         
-        # Selon l'exemple, ID "17" pour les totaux
+        # Vérifier dans "Total" (ID "17")
         if "17" in markets:
             market = markets["17"]
             if "total" in market.get("name", "").lower():
@@ -523,7 +515,7 @@ class FootballPredictionBot:
         # Stocker toutes les cotes trouvées
         found_odds = []
         
-        # Selon l'exemple, ID "17" pour les totaux
+        # Vérifier dans "Total" (ID "17")
         if "17" in markets:
             market = markets["17"]
             if "total" in market.get("name", "").lower():
@@ -571,7 +563,7 @@ class FootballPredictionBot:
         # Stocker toutes les cotes trouvées
         found_odds = []
         
-        # Vérifier dans ID "17" (Total)
+        # Vérifier dans "Total" (ID "17")
         if "17" in markets:
             market = markets["17"]
             if "total" in market.get("name", "").lower():
@@ -619,7 +611,7 @@ class FootballPredictionBot:
         # Stocker toutes les cotes trouvées
         found_odds = []
         
-        # Vérifier dans ID "19" (Both Teams To Score)
+        # Vérifier dans "Both Teams To Score" (ID "19")
         if "19" in markets:
             market = markets["19"]
             if "both teams to score" in market.get("name", "").lower():
@@ -666,7 +658,7 @@ class FootballPredictionBot:
             return None
         
         # Vérifier si c'est une cote attrayante (pas trop basse ni trop haute)
-        if home_odds < 1.30 or home_odds > 5.0:  # Ajusté selon les conditions demandées
+        if home_odds < 1.30 or home_odds > 5.0:
             return None
             
         result = {
@@ -677,7 +669,6 @@ class FootballPredictionBot:
         }
         
         # Calculer la confiance basée sur les cotes (inversement proportionnelle)
-        # Plus la cote est basse, plus on est confiant
         odds_confidence = 1.0 - ((home_odds - self.min_odds) / (5.0 - self.min_odds))
         odds_confidence = max(0.60, min(0.85, odds_confidence))
         
@@ -700,7 +691,7 @@ class FootballPredictionBot:
             return None
         
         # Vérifier si c'est une cote attrayante (pas trop basse ni trop haute)
-        if away_odds < 1.30 or away_odds > 5.0:  # Ajusté selon les conditions demandées
+        if away_odds < 1.30 or away_odds > 5.0:
             return None
             
         result = {
@@ -724,9 +715,23 @@ class FootballPredictionBot:
         return result
 
     def find_double_chance_1X(self, markets, basic_odds):
-        """Modèle de calcul pour la prédiction Double Chance 1X."""
-        # Ne proposer 1X que si l'équipe à domicile a une cote élevée
-        if basic_odds.get("home") and basic_odds.get("home") < self.high_odds_threshold:
+        """
+        Modèle de calcul pour la prédiction Double Chance 1X.
+        On predit une double chance si cette equipe peut potentiellement gagner ce match mais sa cote semble trop grande.
+        """
+        # Récupérer les cotes de base
+        home_odds = basic_odds.get("home")
+        draw_odds = basic_odds.get("draw")
+        
+        # Vérifier si les cotes existent
+        if not home_odds or not draw_odds:
+            return None
+        
+        # NOUVEAU: Ajout d'une vérification plus sophistiquée pour les doubles chances
+        # On donne une double chance 1X quand:
+        # 1. L'équipe à domicile a une cote élevée (>2.0) mais pas trop élevée (<5.0)
+        # 2. La cote du nul est inférieure à la cote de l'équipe à domicile * 1.5 (pour éviter les cas trop déséquilibrés)
+        if not (2.0 <= home_odds <= 5.0 and draw_odds <= home_odds * 1.5):
             return None
             
         result = {
@@ -739,7 +744,7 @@ class FootballPredictionBot:
         # Stocker toutes les cotes trouvées
         found_odds = []
         
-        # Vérifier dans ID "8" (Double Chance)
+        # Vérifier dans "Double Chance" (ID "8")
         if "8" in markets:
             market = markets["8"]
             if "double chance" in market.get("name", "").lower():
@@ -748,7 +753,7 @@ class FootballPredictionBot:
                     odds = outcome.get("odds")
                     
                     # On cherche "home or x"
-                    if "home or x" in name and odds:
+                    if ("home or x" in name or "1x" in name.replace(" ", "")) and odds:
                         # Vérifier que les cotes sont dans notre plage
                         if self.min_odds <= odds <= self.max_odds:
                             found_odds.append({"odds": odds, "name": name})
@@ -777,9 +782,23 @@ class FootballPredictionBot:
         return None
 
     def find_double_chance_X2(self, markets, basic_odds):
-        """Modèle de calcul pour la prédiction Double Chance X2."""
-        # Ne proposer X2 que si l'équipe à l'extérieur a une cote élevée
-        if basic_odds.get("away") and basic_odds.get("away") < self.high_odds_threshold:
+        """
+        Modèle de calcul pour la prédiction Double Chance X2.
+        On predit une double chance si cette equipe peut potentiellement gagner ce match mais sa cote semble trop grande.
+        """
+        # Récupérer les cotes de base
+        away_odds = basic_odds.get("away")
+        draw_odds = basic_odds.get("draw")
+        
+        # Vérifier si les cotes existent
+        if not away_odds or not draw_odds:
+            return None
+        
+        # NOUVEAU: Ajout d'une vérification plus sophistiquée pour les doubles chances
+        # On donne une double chance X2 quand:
+        # 1. L'équipe à l'extérieur a une cote élevée (>2.0) mais pas trop élevée (<5.0)
+        # 2. La cote du nul est inférieure à la cote de l'équipe à l'extérieur * 1.5 (pour éviter les cas trop déséquilibrés)
+        if not (2.0 <= away_odds <= 5.0 and draw_odds <= away_odds * 1.5):
             return None
             
         result = {
@@ -792,7 +811,7 @@ class FootballPredictionBot:
         # Stocker toutes les cotes trouvées
         found_odds = []
         
-        # Vérifier dans ID "8" (Double Chance)
+        # Vérifier dans "Double Chance" (ID "8")
         if "8" in markets:
             market = markets["8"]
             if "double chance" in market.get("name", "").lower():
@@ -801,7 +820,7 @@ class FootballPredictionBot:
                     odds = outcome.get("odds")
                     
                     # On cherche "away or x"
-                    if "away or x" in name and odds:
+                    if ("away or x" in name or "x2" in name.replace(" ", "")) and odds:
                         # Vérifier que les cotes sont dans notre plage
                         if self.min_odds <= odds <= self.max_odds:
                             found_odds.append({"odds": odds, "name": name})
@@ -895,7 +914,7 @@ class FootballPredictionBot:
                 remaining = len(market.get("outcomes", [])) - 3
                 logger.info(f"  + {remaining} autres issues...")
 
-    def generate_match_predictions(self, match_id, markets, league_name):
+    def generate_match_predictions(self, match_id, markets, league_name, home_team, away_team):
         """
         Génère toutes les prédictions possibles pour un match spécifique,
         calcule leur confiance et les trie par niveau de confiance.
@@ -1009,7 +1028,7 @@ class FootballPredictionBot:
                 continue
             
             # Générer toutes les prédictions possibles pour ce match
-            all_predictions = self.generate_match_predictions(match_id, markets, league_name)
+            all_predictions = self.generate_match_predictions(match_id, markets, league_name, home_team, away_team)
             
             # Si aucune prédiction n'a été trouvée, passer au match suivant
             if not all_predictions:
@@ -1079,6 +1098,31 @@ class FootballPredictionBot:
             self.coupon_total_odds = round(self.coupon_total_odds, 2)
         
         logger.info(f"Prédictions générées pour {len(self.predictions)} match(s) avec une cote totale de {self.coupon_total_odds}")
+    
+    def print_coupon_summary(self):
+        """Affiche un récapitulatif du coupon dans la console."""
+        if not self.predictions:
+            logger.info("=== AUCUNE PRÉDICTION GÉNÉRÉE ===")
+            return
+        
+        logger.info("\n" + "=" * 80)
+        logger.info("=== RÉCAPITULATIF DU COUPON ===")
+        logger.info("=" * 80)
+        
+        for i, (match_id, pred) in enumerate(self.predictions.items()):
+            # Calculer l'heure du match au format local
+            start_time = datetime.fromtimestamp(pred["start_timestamp"], self.timezone).strftime("%H:%M")
+            
+            logger.info(f"MATCH {i+1}: {pred['home_team']} vs {pred['away_team']}")
+            logger.info(f"Ligue: {pred['league_name']}")
+            logger.info(f"Heure: {start_time}")
+            logger.info(f"Prédiction: {pred['type']}")
+            logger.info(f"Cote: {pred['odds']}")
+            logger.info(f"Confiance: {pred['confidence']:.2f}")
+            logger.info("-" * 50)
+        
+        logger.info(f"COTE TOTALE DU COUPON: {self.coupon_total_odds}")
+        logger.info("=" * 80 + "\n")
     
     def format_prediction_message(self):
         """Formate le message de prédiction pour Telegram avec mise en forme Markdown améliorée."""
