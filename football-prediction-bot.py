@@ -750,7 +750,7 @@ class FootballPredictionBot:
         logger.info("=" * 80 + "\n")
     
     def format_prediction_message(self):
-        """Formate le message de prédiction pour Telegram avec mise en forme simple et propre."""
+        """Formate le message de prédiction pour Telegram avec mise en forme simple et propre en français."""
         now = datetime.now(self.timezone)
         date_str = now.strftime("%d/%m/%Y")
         
@@ -760,7 +760,7 @@ class FootballPredictionBot:
         
         # Si aucune prédiction n'a été générée
         if not self.predictions:
-            message += "_Aucune prédiction fiable n'a pu être générée pour aujourd'hui. Revenez demain!_"
+            message += "_Aucune prédiction fiable n'a pu être générée pour aujourd'hui. Revenez demain !_"
             return message
         
         # Ajouter chaque prédiction au message
@@ -778,14 +778,15 @@ class FootballPredictionBot:
             # Équipes en gras
             message += f"⚽️ **{pred['home_team']} vs {pred['away_team']}**\n"
             
-            # Heure
-            message += f"⏰ Heure: {start_time}\n"
+            # Heure en italique
+            message += f"⏰ _Heure: {start_time}_\n"
             
-            # Prédiction en gras
-            message += f"🎯 **PRÉDICTION: {pred['type']}**\n"
+            # Prédiction en gras avec format simplifié
+            prediction_text = self.format_prediction_text(pred['type'])
+            message += f"🎯 **PRÉDICTION: {prediction_text}**\n"
             
-            # Cote simple
-            message += f"💰 Cote: {pred['odds']}\n"
+            # Cote en gras
+            message += f"💰 **Cote: {pred['odds']}**\n"
         
         # Ajouter la cote totale en gras
         message += f"----------------------------\n\n"
@@ -798,6 +799,38 @@ class FootballPredictionBot:
         message += f"🔞 _Pariez de façon responsable._"
         
         return message
+    
+    def format_prediction_text(self, prediction_type):
+        """Convertit les types de prédictions en format français simplifié."""
+        # Conversions pour les totaux de buts
+        if "Over 1.5 buts" in prediction_type:
+            return "+1,5 buts"
+        elif "Over 2.5 buts" in prediction_type:
+            return "+2,5 buts"
+        elif "Over 3.5 buts" in prediction_type:
+            return "+3,5 buts"
+        elif "Under 1.5 buts" in prediction_type:
+            return "-1,5 buts"
+        elif "Under 2.5 buts" in prediction_type:
+            return "-2,5 buts"
+        elif "Under 3.5 buts" in prediction_type:
+            return "-3,5 buts"
+        
+        # Conversions pour les autres types de prédictions
+        elif "Les deux équipes marquent" in prediction_type:
+            return "Les deux équipes marquent"
+        elif "Victoire domicile" in prediction_type:
+            return "Victoire domicile"
+        elif "Victoire extérieur" in prediction_type:
+            return "Victoire extérieur"
+        elif "Double chance 1X" in prediction_type:
+            return "Double chance 1X"
+        elif "Double chance X2" in prediction_type:
+            return "Double chance X2"
+        elif "Double chance 12" in prediction_type:
+            return "Double chance 12"
+        else:
+            return prediction_type
     
     def send_to_telegram(self, message):
         """Envoie un message sur le canal Telegram."""
