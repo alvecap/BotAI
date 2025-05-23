@@ -44,11 +44,11 @@ class FootballPredictionBot:
         # Fuseau horaire pour l'Afrique centrale
         self.timezone = pytz.timezone('Africa/Brazzaville')
         
-        # BARÈME CORRIGÉ : Seulement 1.5, 2.5, 3.5 buts + cote minimale 1.10
+        # RÈGLES CLARIFIÉES SELON VOS INSTRUCTIONS
         self.max_odds_by_goals = {
-            1.5: 1.99,   # Over 1.5  
-            2.5: 2.50,   # Over 2.5
-            3.5: 3.80    # Over 3.5 (pas 0.5, 4.5, 5.5)
+            1.5: 1.99,   # Over 1.5 (barème équipes)
+            2.5: 2.50,   # Over 2.5 (si les 2 équipes respectent 1.5)
+            3.5: 3.00    # Over 3.5 (cote max 3.00 au lieu de 3.80)
         }
         
         # Cote minimale acceptée pour toute prédiction
@@ -443,10 +443,10 @@ class FootballPredictionBot:
         
         return double_chance_odds
 
-    # ============= MODÈLES DE CALCUL CORRIGÉS =============
+    # ============= MODÈLES DE CALCUL AVEC RÈGLES CLARIFIÉES =============
     
     def calculate_all_predictions(self, total_goals, home_totals, away_totals, result_odds, handicap_odds, btts_odds, double_chance_odds, league_name):
-        """Calcule les prédictions selon vos règles exactes."""
+        """Calcule les prédictions selon vos règles exactes clarifiées."""
         predictions = []
         
         # Récupérer les données de base
@@ -464,31 +464,30 @@ class FootballPredictionBot:
         logger.info(f"  Home Over 1.5: {home_over_15} ({'✅' if home_respects_bareme else '❌'})")
         logger.info(f"  Away Over 1.5: {away_over_15} ({'✅' if away_respects_bareme else '❌'})")
         
-        # MODÈLE 1: LES DEUX ÉQUIPES MARQUENT + OVER 2.5 (les deux respectent le barème)
+        # MODÈLE 1: +2,5 BUTS ET LES DEUX MARQUENT (si home 1.5 ET away 1.5 respectent le barème)
         if home_respects_bareme and away_respects_bareme:
-            # BTTS
+            # Les deux équipes marquent
             if btts_odds["yes"] and btts_odds["yes"] >= self.min_odds_threshold:
                 predictions.append({
                     "type": "Les deux équipes marquent",
                     "odds": btts_odds["yes"],
                     "confidence": 85,
                     "priority": 1,
-                    "model": "Barème: Les 2 équipes respectent Over 1.5"
+                    "model": "Modèle 1: Home 1.5 ET Away 1.5 respectent barème"
                 })
             
-            # Over 2.5 buts
+            # +2,5 buts
             over_25_real = total_goals["over"].get(2.5)
             if over_25_real and over_25_real <= self.max_odds_by_goals[2.5] and over_25_real >= self.min_odds_threshold:
                 predictions.append({
-                    "type": "Over 2.5 buts",
+                    "type": "+2,5 buts",
                     "odds": over_25_real,
                     "confidence": 80,
                     "priority": 1,
-                    "model": "Barème: Les 2 équipes respectent Over 1.5"
+                    "model": "Modèle 1: Home 1.5 ET Away 1.5 respectent barème"
                 })
         
-        # MODÈLE 2: VICTOIRE DIRECTE OU DOUBLE CHANCE (règle clarifiée)
-        # Double chance SEULEMENT si on veut donner victoire directe mais cote ≥ 2.0
+        # MODÈLE 2: VICTOIRE DIRECTE OU DOUBLE CHANCE (formule handicap)
         if home_win_odds and home_handicap_minus1:
             ecart_home = round(home_handicap_minus1 - home_win_odds, 2)
             if 0.30 <= ecart_home <= 0.60:
@@ -499,7 +498,7 @@ class FootballPredictionBot:
                         "odds": home_win_odds,
                         "confidence": 90,
                         "priority": 1,
-                        "model": f"Handicap: Écart {ecart_home}, Cote < 2.0"
+                        "model": f"Modèle 2: Écart {ecart_home}, Cote < 2.0"
                     })
                 elif home_win_odds >= 2.0:
                     # Double Chance si ≥ 2.0
@@ -510,7 +509,7 @@ class FootballPredictionBot:
                             "odds": dc_1x_odds,
                             "confidence": 85,
                             "priority": 1,
-                            "model": f"Handicap: Écart {ecart_home}, Cote ≥ 2.0 → Double Chance"
+                            "model": f"Modèle 2: Écart {ecart_home}, Cote ≥ 2.0 → Double Chance"
                         })
         
         if away_win_odds and away_handicap_minus1:
@@ -523,7 +522,7 @@ class FootballPredictionBot:
                         "odds": away_win_odds,
                         "confidence": 88,
                         "priority": 1,
-                        "model": f"Handicap: Écart {ecart_away}, Cote < 2.0"
+                        "model": f"Modèle 2: Écart {ecart_away}, Cote < 2.0"
                     })
                 elif away_win_odds >= 2.0:
                     # Double Chance si ≥ 2.0
@@ -534,20 +533,21 @@ class FootballPredictionBot:
                             "odds": dc_x2_odds,
                             "confidence": 83,
                             "priority": 1,
-                            "model": f"Handicap: Écart {ecart_away}, Cote ≥ 2.0 → Double Chance"
+                            "model": f"Modèle 2: Écart {ecart_away}, Cote ≥ 2.0 → Double Chance"
                         })
         
-        # MODÈLE 3: UNDER 3.5 BUTS (aucune équipe ne respecte le barème)
+        # MODÈLE 3: -3,5 BUTS (aucune équipe ne respecte le barème)
         if not home_respects_bareme and not away_respects_bareme:
             under_35_real = total_goals["under"].get(3.5)
             
-            if under_35_real and under_35_real <= 3.80 and under_35_real >= self.min_odds_threshold:
+            # CORRECTION: Cote max 3.00 pour -3,5 buts
+            if under_35_real and under_35_real <= self.max_odds_by_goals[3.5] and under_35_real >= self.min_odds_threshold:
                 predictions.append({
-                    "type": "Under 3.5 buts",
+                    "type": "-3,5 buts",
                     "odds": under_35_real,
                     "confidence": 75,
                     "priority": 2,
-                    "model": "Barème: Aucune équipe ne respecte Over 1.5"
+                    "model": "Modèle 3: Aucune équipe ne respecte barème"
                 })
         
         # MODÈLE 4: DOUBLE CHANCE (une seule équipe respecte le barème)
@@ -559,7 +559,7 @@ class FootballPredictionBot:
                     "odds": dc_1x_odds,
                     "confidence": 78,
                     "priority": 2,
-                    "model": "Barème: Seule équipe domicile respecte Over 1.5"
+                    "model": "Modèle 4: Seule équipe domicile respecte barème"
                 })
         
         if away_respects_bareme and not home_respects_bareme:
@@ -570,33 +570,20 @@ class FootballPredictionBot:
                     "odds": dc_x2_odds,
                     "confidence": 76,
                     "priority": 2,
-                    "model": "Barème: Seule équipe extérieur respecte Over 1.5"
+                    "model": "Modèle 4: Seule équipe extérieur respecte barème"
                 })
         
-        # MODÈLE 5: OVER 1.5 BUTS (une seule équipe respecte le barème)
+        # MODÈLE 5: +1,5 BUTS (une seule équipe respecte le barème)
         if (home_respects_bareme and not away_respects_bareme) or (away_respects_bareme and not home_respects_bareme):
             over_15_real = total_goals["over"].get(1.5)
             if over_15_real and over_15_real <= self.max_odds_by_goals[1.5] and over_15_real >= self.min_odds_threshold:
                 predictions.append({
-                    "type": "Over 1.5 buts",
+                    "type": "+1,5 buts",
                     "odds": over_15_real,
                     "confidence": 82,
                     "priority": 2,
-                    "model": "Barème: Une seule équipe respecte Over 1.5"
+                    "model": "Modèle 5: Une seule équipe respecte barème"
                 })
-        
-        # PRÉDICTIONS SUPPLÉMENTAIRES basées sur le barème direct (SEULEMENT 1.5, 2.5, 3.5)
-        for goal_line, max_allowed_odds in self.max_odds_by_goals.items():
-            if goal_line in total_goals["over"]:
-                actual_odds = total_goals["over"][goal_line]
-                if actual_odds <= max_allowed_odds and actual_odds >= self.min_odds_threshold:
-                    predictions.append({
-                        "type": f"Over {goal_line} buts",
-                        "odds": actual_odds,
-                        "confidence": round((max_allowed_odds - actual_odds) / max_allowed_odds * 100, 1),
-                        "priority": 3,
-                        "model": f"Barème direct: {actual_odds} ≤ {max_allowed_odds}"
-                    })
         
         return predictions
     
@@ -618,7 +605,7 @@ class FootballPredictionBot:
     
     def generate_predictions(self):
         """Génère les meilleures prédictions pour les matchs sélectionnés."""
-        logger.info("=== GÉNÉRATION DES PRÉDICTIONS CORRIGÉES ===")
+        logger.info("=== GÉNÉRATION DES PRÉDICTIONS FINALES ===")
         
         used_prediction_types = []
         
@@ -682,7 +669,7 @@ class FootballPredictionBot:
                     prediction_type = prediction["type"]
                     
                     # Accepter les under goals comme répétitions pour les ligues à faible scoring
-                    if "under" in prediction_type.lower():
+                    if "-" in prediction_type:
                         selected_prediction = prediction
                         break
             
@@ -729,7 +716,7 @@ class FootballPredictionBot:
             return
         
         logger.info("\n" + "=" * 80)
-        logger.info("=== RÉCAPITULATIF DU COUPON CORRIGÉ ===")
+        logger.info("=== RÉCAPITULATIF DU COUPON FINAL ===")
         logger.info("=" * 80)
         
         for i, (match_id, pred) in enumerate(self.predictions.items()):
@@ -750,7 +737,7 @@ class FootballPredictionBot:
         logger.info("=" * 80 + "\n")
     
     def format_prediction_message(self):
-        """Formate le message de prédiction pour Telegram avec mise en forme simple et propre en français."""
+        """Formate le message de prédiction pour Telegram avec mise en forme française."""
         now = datetime.now(self.timezone)
         date_str = now.strftime("%d/%m/%Y")
         
@@ -781,9 +768,8 @@ class FootballPredictionBot:
             # Heure en italique
             message += f"⏰ _Heure: {start_time}_\n"
             
-            # Prédiction en gras avec format simplifié
-            prediction_text = self.format_prediction_text(pred['type'])
-            message += f"🎯 **PRÉDICTION: {prediction_text}**\n"
+            # Prédiction en gras
+            message += f"🎯 **PRÉDICTION: {pred['type']}**\n"
             
             # Cote en gras
             message += f"💰 **Cote: {pred['odds']}**\n"
@@ -799,38 +785,6 @@ class FootballPredictionBot:
         message += f"🔞 _Pariez de façon responsable._"
         
         return message
-    
-    def format_prediction_text(self, prediction_type):
-        """Convertit les types de prédictions en format français simplifié."""
-        # Conversions pour les totaux de buts
-        if "Over 1.5 buts" in prediction_type:
-            return "+1,5 buts"
-        elif "Over 2.5 buts" in prediction_type:
-            return "+2,5 buts"
-        elif "Over 3.5 buts" in prediction_type:
-            return "+3,5 buts"
-        elif "Under 1.5 buts" in prediction_type:
-            return "-1,5 buts"
-        elif "Under 2.5 buts" in prediction_type:
-            return "-2,5 buts"
-        elif "Under 3.5 buts" in prediction_type:
-            return "-3,5 buts"
-        
-        # Conversions pour les autres types de prédictions
-        elif "Les deux équipes marquent" in prediction_type:
-            return "Les deux équipes marquent"
-        elif "Victoire domicile" in prediction_type:
-            return "Victoire domicile"
-        elif "Victoire extérieur" in prediction_type:
-            return "Victoire extérieur"
-        elif "Double chance 1X" in prediction_type:
-            return "Double chance 1X"
-        elif "Double chance X2" in prediction_type:
-            return "Double chance X2"
-        elif "Double chance 12" in prediction_type:
-            return "Double chance 12"
-        else:
-            return prediction_type
     
     def send_to_telegram(self, message):
         """Envoie un message sur le canal Telegram."""
@@ -860,7 +814,7 @@ class FootballPredictionBot:
         """Envoie les prédictions sur le canal Telegram."""
         message = self.format_prediction_message()
         
-        logger.info("Envoi des prédictions corrigées sur Telegram...")
+        logger.info("Envoi des prédictions finales sur Telegram...")
         success = self.send_to_telegram(message)
         
         if success:
