@@ -750,18 +750,17 @@ class FootballPredictionBot:
         logger.info("=" * 80 + "\n")
     
     def format_prediction_message(self):
-        """Formate le message de prédiction pour Telegram avec mise en forme Markdown améliorée."""
+        """Formate le message de prédiction pour Telegram avec mise en forme simple et propre."""
         now = datetime.now(self.timezone)
         date_str = now.strftime("%d/%m/%Y")
         
         # Titre en gras avec émojis
-        message = "🎯 *COUPON BASÉ SUR LE BARÈME CORRIGÉ* 🎯\n"
-        message += f"📅 *{date_str}*\n"
-        message += f"💎 *Cote minimale: {self.min_odds_threshold}* 💎\n\n"
+        message = "🎯 **COUPON DU JOUR** 🎯\n"
+        message += f"📅 **{date_str}**\n\n"
         
         # Si aucune prédiction n'a été générée
         if not self.predictions:
-            message += "_Aucune prédiction fiable n'a pu être générée pour aujourd'hui selon le barème corrigé. Revenez demain!_"
+            message += "_Aucune prédiction fiable n'a pu être générée pour aujourd'hui. Revenez demain!_"
             return message
         
         # Ajouter chaque prédiction au message
@@ -773,34 +772,28 @@ class FootballPredictionBot:
             # Calculer l'heure du match au format local
             start_time = datetime.fromtimestamp(pred["start_timestamp"], self.timezone).strftime("%H:%M")
             
-            # Nom de la ligue en MAJUSCULES
-            message += f"🏆 *{pred['league_name'].upper()}*\n"
+            # Nom de la ligue en MAJUSCULES et gras
+            message += f"🏆 **{pred['league_name'].upper()}**\n"
             
-            # Équipes sur une ligne
-            message += f"⚽️ *{pred['home_team']} vs {pred['away_team']}*\n"
+            # Équipes en gras
+            message += f"⚽️ **{pred['home_team']} vs {pred['away_team']}**\n"
             
-            # Heure sur une nouvelle ligne
+            # Heure
             message += f"⏰ Heure: {start_time}\n"
             
-            # Prédiction en gras et plus visible
-            message += f"🎯 *PRÉDICTION: {pred['type']}*\n"
+            # Prédiction en gras
+            message += f"🎯 **PRÉDICTION: {pred['type']}**\n"
             
-            # Cote et confiance avec validation cote minimale
-            message += f"💰 Cote: {pred['odds']} (≥{self.min_odds_threshold} ✅) | 📊 Confiance: {pred['confidence']:.0f}%\n"
-            
-            # Modèle utilisé
-            if "model" in pred:
-                message += f"🔬 Modèle: _{pred['model']}_\n"
+            # Cote simple
+            message += f"💰 Cote: {pred['odds']}\n"
         
         # Ajouter la cote totale en gras
         message += f"----------------------------\n\n"
-        message += f"📊 *COTE TOTALE: {self.coupon_total_odds}*\n"
-        message += f"📈 *{len(self.predictions)} MATCHS SÉLECTIONNÉS*\n\n"
+        message += f"📊 **COTE TOTALE: {self.coupon_total_odds}**\n"
+        message += f"📈 **{len(self.predictions)} MATCHS SÉLECTIONNÉS**\n\n"
         
         # Conseils en italique
-        message += f"💡 _Prédictions basées sur notre barème de sécurité corrigé_\n"
-        message += f"🎯 _Seulement Over 1.5, 2.5, 3.5 buts acceptés_\n"
-        message += f"💎 _Cote minimale garantie: {self.min_odds_threshold}_\n"
+        message += f"💡 _Prédictions basées sur notre barème de sécurité_\n"
         message += f"🎲 _Misez toujours 5% de votre capital maximum_\n"
         message += f"🔞 _Pariez de façon responsable._"
         
