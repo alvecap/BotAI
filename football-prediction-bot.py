@@ -737,54 +737,55 @@ class FootballPredictionBot:
         logger.info("=" * 80 + "\n")
     
     def format_prediction_message(self):
-    """Formate le message de prédiction pour Telegram avec mise en forme française améliorée."""
-    now = datetime.now(self.timezone)
-    date_str = now.strftime("%d/%m/%Y")
-    
-    # Titre en gras avec émojis
-    message = "🎯 **COUPON DU JOUR** 🎯\n"
-    message += f"📅 **{date_str}**\n\n"
-    
-    # Si aucune prédiction n'a été générée
-    if not self.predictions:
-        message += "_Aucune prédiction fiable n'a pu être générée pour aujourd'hui. Revenez demain !_"
+        """Formate le message de prédiction pour Telegram avec mise en forme française."""
+        now = datetime.now(self.timezone)
+        date_str = now.strftime("%d/%m/%Y")
+        
+        # Titre en gras avec émojis
+        message = "🎯 **COUPON DU JOUR** 🎯\n"
+        message += f"📅 **{date_str}**\n\n"
+        
+        # Si aucune prédiction n'a été générée
+        if not self.predictions:
+            message += "_Aucune prédiction fiable n'a pu être générée pour aujourd'hui. Revenez demain !_"
+            return message
+        
+        # Ajouter chaque prédiction au message
+        for i, (match_id, pred) in enumerate(self.predictions.items()):
+            # Séparateur
+            if i > 0:
+                message += "----------------------------\n\n"
+            
+            # Calculer l'heure du match au format local
+            start_time = datetime.fromtimestamp(pred["start_timestamp"], self.timezone).strftime("%H:%M")
+            
+            # Nom de la ligue en gras
+            message += f"🏆 **{pred['league_name'].upper()}**\n"
+            
+            # Équipes en gras
+            message += f"⚽️ **{pred['home_team']} vs {pred['away_team']}**\n"
+            
+            # Heure en italique
+            message += f"⏰ _HEURE : {start_time}_\n"
+            
+            # Prédiction en gras
+            message += f"🎯 **PRÉDICTION: {pred['type']}**\n"
+            
+            # Cote en gras
+            message += f"💰 **Cote: {pred['odds']}**\n"
+        
+        # Ajouter la cote totale en gras
+        message += f"----------------------------\n\n"
+        message += f"📊 **COTE TOTALE: {self.coupon_total_odds}**\n"
+        message += f"📈 **{len(self.predictions)} MATCHS SÉLECTIONNÉS**\n\n"
+        
+        # Conseils en italique
+        message += f"_💡 Prédictions basées sur notre barème de sécurité_\n"
+        message += f"_🎲 Misez toujours 5% de votre capital maximum_\n"
+        message += f"_🔞 Pariez de façon responsable._"
+        
         return message
     
-    # Ajouter chaque prédiction au message
-    for i, (match_id, pred) in enumerate(self.predictions.items()):
-        # Séparateur
-        if i > 0:
-            message += "----------------------------\n\n"
-        
-        # Calculer l'heure du match au format local
-        start_time = datetime.fromtimestamp(pred["start_timestamp"], self.timezone).strftime("%H:%M")
-        
-        # Nom de la ligue en MAJUSCULES et gras avec italique
-        message += f"🏆 ***{pred['league_name'].upper()}***\n"
-        
-        # Équipes en gras et italique
-        message += f"⚽️ ***{pred['home_team']} vs {pred['away_team']}***\n"
-        
-        # Heure en italique uniquement
-        message += f"⏰ _HEURE : {start_time}_\n"
-        
-        # Prédiction en gras et italique
-        message += f"🎯 ***PRÉDICTION: {pred['type']}***\n"
-        
-        # Cote en gras et italique
-        message += f"💰 ***Cote: {pred['odds']}***\n"
-    
-    # Ajouter la cote totale en gras et italique
-    message += f"----------------------------\n\n"
-    message += f"📊 ***COTE TOTALE: {self.coupon_total_odds}***\n"
-    message += f"📈 ***{len(self.predictions)} MATCHS SÉLECTIONNÉS***\n\n"
-    
-    # Conseils en italique uniquement
-    message += f"_💡 Prédictions basées sur notre barème de sécurité_\n"
-    message += f"_🎲 Misez toujours 5% de votre capital maximum_\n"
-    message += f"_🔞 Pariez de façon responsable._"
-    
-    return message
     def send_to_telegram(self, message):
         """Envoie un message sur le canal Telegram."""
         url = f"https://api.telegram.org/bot{self.telegram_bot_token}/sendMessage"
