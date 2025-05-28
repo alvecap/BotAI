@@ -938,8 +938,8 @@ class FootballPredictionBot:
         message += f"📈 <b>{len(self.predictions)} MATCHS SÉLECTIONNÉS</b>\n\n"
         
         # Conseils en italique avec mention des nouvelles limites
-        message += f"<i>💡 Prédictions avec limites de sécurité renforcées</i>\n"
-        message += f"<i>🔒 Victoires max {self.max_odds_limits['direct_win']}, -3.5 buts max {self.max_odds_limits['under_35']}, Global max {self.max_odds_limits['global_max']}</i>\n"
+
+    
         message += f"<i>🎲 Misez toujours 5% de votre capital maximum</i>\n"
         message += f"<i>🔞 Pariez de façon responsable.</i>"
         
