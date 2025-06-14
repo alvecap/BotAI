@@ -284,18 +284,21 @@ class FootballPredictionBot:
 
     def send_coupon(self):
         """Envoie le coupon sur Telegram avec la mise en forme exacte demandée"""
-        message = "⚽️🔥 <b>PRÉDICTIONS DU JOUR</b> 🔥⚽️\n\n"
+        message = "⚽️🔥 <b>COUPON DU JOUR</b> 🔥⚽️\n\n"
         
-        for pred in self.predictions.values():
+        for i, pred in enumerate(self.predictions.values(), 1):
             message += (
                 f"<b>🏆 {pred['league']}</b>\n"
                 f"<b>⚔️ {pred['home_team']} vs {pred['away_team']}</b>\n"
                 f"🕒 HEURE: {pred['time']}\n"
                 f"<b>🎯 PRÉDICTION: {pred['type']}</b>\n"
-                f"<b>💰 Cote: {pred['odds']}</b>\n\n"
+                f"<b>💰 Cote: {pred['odds']}</b>\n"
             )
+            if i < len(self.predictions):
+                message += "――――――――――――――――――――\n\n"
         
-        message += f"<b>📊 COTE TOTALE: {self.coupon_total_odds}</b>"
+        message += f"\n<b>📊 COTE TOTALE: {self.coupon_total_odds}</b>\n\n"
+        message += "<i>🔞 Pariez de manière responsable</i>"
         
         try:
             response = requests.post(
