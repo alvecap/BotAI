@@ -38,7 +38,7 @@ class FootballPredictionBot:
         
         # Barème des cotes maximales
         self.max_odds = {
-            1.5: 1.85,  # Maximum 1.85 pour toutes les prédictions
+            1.5: 1.85,
             2.5: 1.85,
             3.5: 1.85,
             4.5: 1.85
@@ -112,7 +112,6 @@ class FootballPredictionBot:
                     selected_matches.remove(match)
                     logger.info(f"Match sélectionné: {self.format_match_log(prediction)}")
             
-            # Remplacement si nécessaire
             if valid_matches < self.min_matches and len(matches) > len(selected_matches):
                 new_candidates = [m for m in matches if m not in selected_matches]
                 if new_candidates:
@@ -212,15 +211,11 @@ class FootballPredictionBot:
 
     def extract_prediction(self, markets, match):
         """Extrait la meilleure prédiction selon le barème"""
-        # Dictionnaire pour stocker les cotes valides trouvées
         valid_predictions = []
-        
-        # Extraction des cotes
         over_goals = {}
         home_over = {}
         away_over = {}
         
-        # Total goals (market 17)
         if '17' in markets:
             for outcome in markets['17'].get('outcomes', []):
                 name = outcome.get('name', '').lower()
@@ -230,7 +225,6 @@ class FootballPredictionBot:
                     elif '3.5' in name: over_goals[3.5] = outcome.get('odds')
                     elif '4.5' in name: over_goals[4.5] = outcome.get('odds')
         
-        # Home totals (market 15)
         if '15' in markets:
             for outcome in markets['15'].get('outcomes', []):
                 name = outcome.get('name', '').lower()
@@ -238,7 +232,6 @@ class FootballPredictionBot:
                     if '1.5' in name: home_over[1.5] = outcome.get('odds')
                     elif '2.5' in name: home_over[2.5] = outcome.get('odds')
         
-        # Away totals (market 62)
         if '62' in markets:
             for outcome in markets['62'].get('outcomes', []):
                 name = outcome.get('name', '').lower()
@@ -246,7 +239,6 @@ class FootballPredictionBot:
                     if '1.5' in name: away_over[1.5] = outcome.get('odds')
                     elif '2.5' in name: away_over[2.5] = outcome.get('odds')
         
-        # Vérification pour +3.5 buts (nécessite +4.5 valide et cote <= 1.85)
         if (self.is_valid_odd(over_goals.get(3.5), 3.5) 
             and self.is_valid_odd(over_goals.get(4.5), 4.5)):
             valid_predictions.append({
@@ -255,7 +247,6 @@ class FootballPredictionBot:
                 'priority': 1
             })
         
-        # Vérification pour +2.5 buts (nécessite over 1.5 des deux équipes et cote <= 1.85)
         if (self.is_valid_odd(over_goals.get(2.5), 2.5)
               and self.is_valid_odd(home_over.get(1.5), 1.5)
               and self.is_valid_odd(away_over.get(1.5), 1.5)):
@@ -265,7 +256,6 @@ class FootballPredictionBot:
                 'priority': 2
             })
         
-        # Vérification pour +1.5 buts (cote <= 1.85)
         if self.is_valid_odd(over_goals.get(1.5), 1.5):
             valid_predictions.append({
                 'type': '+1,5 buts',
@@ -273,9 +263,7 @@ class FootballPredictionBot:
                 'priority': 3
             })
         
-        # Sélection aléatoire parmi les prédictions valides pour varier les types
         if valid_predictions:
-            # On mélange pour éviter de toujours prendre la même priorité
             random.shuffle(valid_predictions)
             selected = min(valid_predictions, key=lambda x: x['priority'])
             
@@ -291,25 +279,23 @@ class FootballPredictionBot:
         return None
 
     def is_valid_odd(self, odd, goal_type):
-        """Vérifie si une cote respecte le barème (1.10 <= cote <= 1.85)"""
+        """Vérifie si une cote respecte le barème"""
         return (odd and self.min_odds <= odd <= self.max_odds.get(goal_type, 1.85))
 
     def send_coupon(self):
-        """Envoie le coupon sur Telegram avec le format exact demandé"""
-        message = ""
+        """Envoie le coupon sur Telegram avec la mise en forme exacte demandée"""
+        message = "⚽️🔥 <b>PRÉDICTIONS DU JOUR</b> 🔥⚽️\n\n"
         
-        for i, pred in enumerate(self.predictions.values(), 1):
+        for pred in self.predictions.values():
             message += (
-                f"<b>{pred['league']}</b>\n"
-                f"<b>{pred['home_team']} vs {pred['away_team']}</b>\n"
-                f"HEURE : {pred['time']}\n"
-                f"PRÉDICTION: {pred['type']}\n"
-                f"Cote: {pred['odds']}\n"
+                f"<b>🏆 {pred['league']}</b>\n"
+                f"<b>⚔️ {pred['home_team']} vs {pred['away_team']}</b>\n"
+                f"🕒 HEURE: {pred['time']}\n"
+                f"<b>🎯 PRÉDICTION: {pred['type']}</b>\n"
+                f"<b>💰 Cote: {pred['odds']}</b>\n\n"
             )
-            if i < len(self.predictions):
-                message += "\n---\n\n"
         
-        message += f"\n<b>COTE TOTALE : {self.coupon_total_odds}</b>"
+        message += f"<b>📊 COTE TOTALE: {self.coupon_total_odds}</b>"
         
         try:
             response = requests.post(
