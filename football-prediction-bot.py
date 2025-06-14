@@ -13,7 +13,7 @@ import requests
 # Configuration du logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[logging.StreamHandler()]
 )
 logger = logging.getLogger('prediction_bot')
@@ -38,17 +38,17 @@ class FootballPredictionBot:
         
         # Barème des cotes maximales
         self.max_odds = {
-            1.5: 1.60,
-            2.5: 2.50,
-            3.5: 3.80,
-            4.5: 5.50
+            1.5: 1.85,  # Maximum 1.85 pour toutes les prédictions
+            2.5: 1.85,
+            3.5: 1.85,
+            4.5: 1.85
         }
         
-        self.min_odds = 1.15
+        self.min_odds = 1.10
         self.min_matches = 2
         self.max_matches = 5
 
-        # Liste des IDs de ligue comme dans votre code initial
+        # Liste des IDs de ligue
         self.league_ids = [1, 118, 148, 127, 110, 136, 251, 252, 253, 301, 302, 303, 304]
 
     def _check_env_variables(self):
@@ -83,7 +83,10 @@ class FootballPredictionBot:
 
     def generate_coupon(self):
         """Génère un nouveau coupon de paris"""
-        logger.info("=== DÉBUT GÉNÉRATION COUPON ===")
+        logger.info("\n" + "="*50)
+        logger.info("DÉBUT GÉNÉRATION DU NOUVEAU COUPON")
+        logger.info("="*50)
+        
         self.predictions = {}
         self.coupon_total_odds = 1.0
         
@@ -92,10 +95,10 @@ class FootballPredictionBot:
             logger.error("Aucun match disponible aujourd'hui")
             return
             
-        selected_matches = random.sample(matches, min(self.max_matches * 2, len(matches)))
+        selected_matches = random.sample(matches, min(self.max_matches * 3, len(matches)))
         valid_matches = 0
         replacement_attempts = 0
-        max_replacements = len(matches)  # Limite basée sur le nombre total de matchs
+        max_replacements = len(matches)
         
         while valid_matches < self.min_matches and replacement_attempts < max_replacements:
             for match in selected_matches[:]:
@@ -107,24 +110,44 @@ class FootballPredictionBot:
                     self.predictions[match['id']] = prediction
                     valid_matches += 1
                     selected_matches.remove(match)
+                    logger.info(f"Match sélectionné: {self.format_match_log(prediction)}")
             
-            # Si pas assez de matchs valides, on remplace
+            # Remplacement si nécessaire
             if valid_matches < self.min_matches and len(matches) > len(selected_matches):
                 new_candidates = [m for m in matches if m not in selected_matches]
                 if new_candidates:
                     selected_matches.extend(random.sample(new_candidates, 1))
                     replacement_attempts += 1
+                    logger.info(f"Tentative de remplacement #{replacement_attempts}")
         
         if self.predictions:
             self.coupon_total_odds = round(math.prod(
                 pred['odds'] for pred in self.predictions.values()
             ), 2)
+            
+            logger.info("\n" + "="*50)
+            logger.info("RÉCAPITULATIF DU COUPON FINAL")
+            for pred in self.predictions.values():
+                logger.info(self.format_match_log(pred))
+            logger.info(f"COTE TOTALE: {self.coupon_total_odds}")
+            logger.info("="*50 + "\n")
+            
             self.send_coupon()
         else:
             logger.error("Impossible de générer un coupon valide")
 
+    def format_match_log(self, prediction):
+        """Formatage pour les logs Render"""
+        return (
+            f"{prediction['league'].upper()}\n"
+            f"{prediction['home_team']} vs {prediction['away_team']}\n"
+            f"HEURE : {prediction['time']}\n"
+            f"PRÉDICTION: {prediction['type']}\n"
+            f"Cote: {prediction['odds']}\n"
+        )
+
     def get_todays_matches(self):
-        """Récupère tous les matchs du jour avec les endpoints originaux"""
+        """Récupère tous les matchs du jour"""
         now = datetime.now(self.timezone)
         today_start = datetime(now.year, now.month, now.day, 0, 0, 0).replace(tzinfo=self.timezone)
         today_end = today_start + timedelta(days=1)
@@ -134,7 +157,6 @@ class FootballPredictionBot:
         
         all_matches = []
         
-        # Utilisation exacte des endpoints originaux comme fourni
         for league_id in self.league_ids:
             try:
                 endpoint = f"/matches?sport_id=1&league_id={league_id}&mode=line&lng=en"
@@ -153,7 +175,7 @@ class FootballPredictionBot:
                 logger.error(f"Erreur API pour ligue {league_id}: {str(e)}")
             finally:
                 conn.close()
-            time.sleep(0.5)  # Respect du rate limiting
+            time.sleep(0.5)
             
         logger.info(f"Nombre de matchs trouvés: {len(all_matches)}")
         return all_matches
@@ -170,10 +192,8 @@ class FootballPredictionBot:
     def analyze_match(self, match):
         """Analyse un match et retourne une prédiction valide"""
         match_id = match['id']
-        logger.info(f"Analyse du match {match['home_team']} vs {match['away_team']}")
         
         try:
-            # Utilisation de l'endpoint original pour les cotes
             endpoint = f"/matches/{match_id}/markets?mode=line&lng=en"
             conn = http.client.HTTPSConnection(self.rapidapi_host)
             conn.request("GET", endpoint, headers=self.headers)
@@ -192,7 +212,10 @@ class FootballPredictionBot:
 
     def extract_prediction(self, markets, match):
         """Extrait la meilleure prédiction selon le barème"""
-        # Extraction des cotes avec la structure originale
+        # Dictionnaire pour stocker les cotes valides trouvées
+        valid_predictions = []
+        
+        # Extraction des cotes
         over_goals = {}
         home_over = {}
         away_over = {}
@@ -223,62 +246,70 @@ class FootballPredictionBot:
                     if '1.5' in name: away_over[1.5] = outcome.get('odds')
                     elif '2.5' in name: away_over[2.5] = outcome.get('odds')
         
-        # Vérification pour +3.5 buts (nécessite +4.5 valide)
+        # Vérification pour +3.5 buts (nécessite +4.5 valide et cote <= 1.85)
         if (self.is_valid_odd(over_goals.get(3.5), 3.5) 
             and self.is_valid_odd(over_goals.get(4.5), 4.5)):
-            return {
-                'home_team': match['home_team'],
-                'away_team': match['away_team'],
-                'league': match['league'],
-                'time': datetime.fromtimestamp(match['start_timestamp'], self.timezone).strftime('%H:%M'),
+            valid_predictions.append({
                 'type': '+3,5 buts',
-                'odds': over_goals[3.5]
-            }
+                'odds': over_goals[3.5],
+                'priority': 1
+            })
         
-        # Vérification pour +2.5 buts (nécessite over 1.5 des deux équipes)
-        elif (self.is_valid_odd(over_goals.get(2.5), 2.5)
+        # Vérification pour +2.5 buts (nécessite over 1.5 des deux équipes et cote <= 1.85)
+        if (self.is_valid_odd(over_goals.get(2.5), 2.5)
               and self.is_valid_odd(home_over.get(1.5), 1.5)
               and self.is_valid_odd(away_over.get(1.5), 1.5)):
-            return {
-                'home_team': match['home_team'],
-                'away_team': match['away_team'],
-                'league': match['league'],
-                'time': datetime.fromtimestamp(match['start_timestamp'], self.timezone).strftime('%H:%M'),
+            valid_predictions.append({
                 'type': '+2,5 buts',
-                'odds': over_goals[2.5]
-            }
+                'odds': over_goals[2.5],
+                'priority': 2
+            })
         
-        # Vérification pour +1.5 buts
-        elif self.is_valid_odd(over_goals.get(1.5), 1.5):
+        # Vérification pour +1.5 buts (cote <= 1.85)
+        if self.is_valid_odd(over_goals.get(1.5), 1.5):
+            valid_predictions.append({
+                'type': '+1,5 buts',
+                'odds': over_goals[1.5],
+                'priority': 3
+            })
+        
+        # Sélection aléatoire parmi les prédictions valides pour varier les types
+        if valid_predictions:
+            # On mélange pour éviter de toujours prendre la même priorité
+            random.shuffle(valid_predictions)
+            selected = min(valid_predictions, key=lambda x: x['priority'])
+            
             return {
                 'home_team': match['home_team'],
                 'away_team': match['away_team'],
                 'league': match['league'],
                 'time': datetime.fromtimestamp(match['start_timestamp'], self.timezone).strftime('%H:%M'),
-                'type': '+1,5 buts',
-                'odds': over_goals[1.5]
+                'type': selected['type'],
+                'odds': selected['odds']
             }
             
         return None
 
     def is_valid_odd(self, odd, goal_type):
-        """Vérifie si une cote respecte le barème"""
-        return (odd and self.min_odds <= odd <= self.max_odds.get(goal_type, 999))
+        """Vérifie si une cote respecte le barème (1.10 <= cote <= 1.85)"""
+        return (odd and self.min_odds <= odd <= self.max_odds.get(goal_type, 1.85))
 
     def send_coupon(self):
-        """Envoie le coupon sur Telegram avec la mise en forme exacte demandée"""
-        message = "<b>PRÉDICTIONS DU JOUR</b>\n\n"
+        """Envoie le coupon sur Telegram avec le format exact demandé"""
+        message = ""
         
-        for pred in self.predictions.values():
+        for i, pred in enumerate(self.predictions.values(), 1):
             message += (
                 f"<b>{pred['league']}</b>\n"
                 f"<b>{pred['home_team']} vs {pred['away_team']}</b>\n"
-                f"Heure : {pred['time']}\n"
-                f"Prédiction : {pred['type']}\n"
-                f"Cote : {pred['odds']}\n\n"
+                f"HEURE : {pred['time']}\n"
+                f"PRÉDICTION: {pred['type']}\n"
+                f"Cote: {pred['odds']}\n"
             )
+            if i < len(self.predictions):
+                message += "\n---\n\n"
         
-        message += f"<b>COTE TOTALE : {self.coupon_total_odds}</b>"
+        message += f"\n<b>COTE TOTALE : {self.coupon_total_odds}</b>"
         
         try:
             response = requests.post(
