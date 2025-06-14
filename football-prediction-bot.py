@@ -5,7 +5,7 @@ import os
 import time
 import logging
 import math
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 import schedule
 import requests
@@ -47,6 +47,9 @@ class FootballPredictionBot:
         self.min_odds = 1.15
         self.min_matches = 2
         self.max_matches = 5
+
+        # Liste des IDs de ligue comme dans votre code initial
+        self.league_ids = [1, 118, 148, 127, 110, 136, 251, 252, 253, 301, 302, 303, 304]
 
     def _check_env_variables(self):
         """Vérification des variables obligatoires"""
@@ -121,31 +124,36 @@ class FootballPredictionBot:
             logger.error("Impossible de générer un coupon valide")
 
     def get_todays_matches(self):
-        """Récupère tous les matchs du jour"""
-        today = datetime.now(self.timezone).date()
-        start_timestamp = int(datetime(
-            today.year, today.month, today.day, 0, 0, 0
-        ).replace(tzinfo=self.timezone).timestamp())
-        end_timestamp = start_timestamp + 86399
+        """Récupère tous les matchs du jour avec les endpoints originaux"""
+        now = datetime.now(self.timezone)
+        today_start = datetime(now.year, now.month, now.day, 0, 0, 0).replace(tzinfo=self.timezone)
+        today_end = today_start + timedelta(days=1)
+        
+        start_timestamp = int(today_start.timestamp())
+        end_timestamp = int(today_end.timestamp())
         
         all_matches = []
         
-        try:
-            conn = http.client.HTTPSConnection(self.rapidapi_host)
-            conn.request("GET", "/matches?date=today", headers=self.headers)
-            res = conn.getresponse()
-            
-            if res.status == 200:
-                data = json.loads(res.read().decode('utf-8'))
-                all_matches = [
-                    m for m in data.get('matches', [])
-                    if (start_timestamp <= m.get('start_time', 0) <= end_timestamp
-                        and self.is_valid_match(m))
-                ]
-        except Exception as e:
-            logger.error(f"Erreur API: {str(e)}")
-        finally:
-            conn.close()
+        # Utilisation exacte des endpoints originaux comme fourni
+        for league_id in self.league_ids:
+            try:
+                endpoint = f"/matches?sport_id=1&league_id={league_id}&mode=line&lng=en"
+                conn = http.client.HTTPSConnection(self.rapidapi_host)
+                conn.request("GET", endpoint, headers=self.headers)
+                res = conn.getresponse()
+                
+                if res.status == 200:
+                    data = json.loads(res.read().decode('utf-8'))
+                    if data.get('status') == 'success':
+                        for match in data.get('data', []):
+                            if (start_timestamp <= match.get('start_timestamp', 0) <= end_timestamp
+                                and self.is_valid_match(match)):
+                                all_matches.append(match)
+            except Exception as e:
+                logger.error(f"Erreur API pour ligue {league_id}: {str(e)}")
+            finally:
+                conn.close()
+            time.sleep(0.5)  # Respect du rate limiting
             
         logger.info(f"Nombre de matchs trouvés: {len(all_matches)}")
         return all_matches
@@ -155,7 +163,7 @@ class FootballPredictionBot:
         return (
             match.get('home_team') and match.get('away_team')
             and len(match['home_team']) >= 3 and len(match['away_team']) >= 3
-            and match.get('id') and match.get('start_time')
+            and match.get('id') and match.get('start_timestamp')
             and match.get('league')
         )
 
@@ -165,14 +173,16 @@ class FootballPredictionBot:
         logger.info(f"Analyse du match {match['home_team']} vs {match['away_team']}")
         
         try:
+            # Utilisation de l'endpoint original pour les cotes
+            endpoint = f"/matches/{match_id}/markets?mode=line&lng=en"
             conn = http.client.HTTPSConnection(self.rapidapi_host)
-            conn.request("GET", f"/matches/{match_id}/odds", headers=self.headers)
+            conn.request("GET", endpoint, headers=self.headers)
             res = conn.getresponse()
             
             if res.status == 200:
-                odds_data = json.loads(res.read().decode('utf-8'))
-                return self.extract_prediction(odds_data, match)
-                
+                data = json.loads(res.read().decode('utf-8'))
+                if data.get('status') == 'success':
+                    return self.extract_prediction(data.get('data', {}), match)
         except Exception as e:
             logger.error(f"Erreur analyse match {match_id}: {str(e)}")
         finally:
@@ -180,58 +190,71 @@ class FootballPredictionBot:
             
         return None
 
-    def extract_prediction(self, odds_data, match):
+    def extract_prediction(self, markets, match):
         """Extrait la meilleure prédiction selon le barème"""
-        # Extraction des cotes
-        over_goals = {
-            1.5: odds_data.get('over_1_5'),
-            2.5: odds_data.get('over_2_5'),
-            3.5: odds_data.get('over_3_5'),
-            4.5: odds_data.get('over_4_5')
-        }
+        # Extraction des cotes avec la structure originale
+        over_goals = {}
+        home_over = {}
+        away_over = {}
         
-        home_over = {
-            1.5: odds_data.get('home_over_1_5'),
-            2.5: odds_data.get('home_over_2_5')
-        }
+        # Total goals (market 17)
+        if '17' in markets:
+            for outcome in markets['17'].get('outcomes', []):
+                name = outcome.get('name', '').lower()
+                if 'over' in name:
+                    if '1.5' in name: over_goals[1.5] = outcome.get('odds')
+                    elif '2.5' in name: over_goals[2.5] = outcome.get('odds')
+                    elif '3.5' in name: over_goals[3.5] = outcome.get('odds')
+                    elif '4.5' in name: over_goals[4.5] = outcome.get('odds')
         
-        away_over = {
-            1.5: odds_data.get('away_over_1_5'),
-            2.5: odds_data.get('away_over_2_5')
-        }
+        # Home totals (market 15)
+        if '15' in markets:
+            for outcome in markets['15'].get('outcomes', []):
+                name = outcome.get('name', '').lower()
+                if 'over' in name:
+                    if '1.5' in name: home_over[1.5] = outcome.get('odds')
+                    elif '2.5' in name: home_over[2.5] = outcome.get('odds')
+        
+        # Away totals (market 62)
+        if '62' in markets:
+            for outcome in markets['62'].get('outcomes', []):
+                name = outcome.get('name', '').lower()
+                if 'over' in name:
+                    if '1.5' in name: away_over[1.5] = outcome.get('odds')
+                    elif '2.5' in name: away_over[2.5] = outcome.get('odds')
         
         # Vérification pour +3.5 buts (nécessite +4.5 valide)
-        if (self.is_valid_odd(over_goals[3.5], 3.5) 
-            and self.is_valid_odd(over_goals[4.5], 4.5)):
+        if (self.is_valid_odd(over_goals.get(3.5), 3.5) 
+            and self.is_valid_odd(over_goals.get(4.5), 4.5)):
             return {
                 'home_team': match['home_team'],
                 'away_team': match['away_team'],
                 'league': match['league'],
-                'time': datetime.fromtimestamp(match['start_time'], self.timezone).strftime('%H:%M'),
+                'time': datetime.fromtimestamp(match['start_timestamp'], self.timezone).strftime('%H:%M'),
                 'type': '+3,5 buts',
                 'odds': over_goals[3.5]
             }
         
         # Vérification pour +2.5 buts (nécessite over 1.5 des deux équipes)
-        elif (self.is_valid_odd(over_goals[2.5], 2.5)
-              and self.is_valid_odd(home_over[1.5], 1.5)
-              and self.is_valid_odd(away_over[1.5], 1.5)):
+        elif (self.is_valid_odd(over_goals.get(2.5), 2.5)
+              and self.is_valid_odd(home_over.get(1.5), 1.5)
+              and self.is_valid_odd(away_over.get(1.5), 1.5)):
             return {
                 'home_team': match['home_team'],
                 'away_team': match['away_team'],
                 'league': match['league'],
-                'time': datetime.fromtimestamp(match['start_time'], self.timezone).strftime('%H:%M'),
+                'time': datetime.fromtimestamp(match['start_timestamp'], self.timezone).strftime('%H:%M'),
                 'type': '+2,5 buts',
                 'odds': over_goals[2.5]
             }
         
         # Vérification pour +1.5 buts
-        elif self.is_valid_odd(over_goals[1.5], 1.5):
+        elif self.is_valid_odd(over_goals.get(1.5), 1.5):
             return {
                 'home_team': match['home_team'],
                 'away_team': match['away_team'],
                 'league': match['league'],
-                'time': datetime.fromtimestamp(match['start_time'], self.timezone).strftime('%H:%M'),
+                'time': datetime.fromtimestamp(match['start_timestamp'], self.timezone).strftime('%H:%M'),
                 'type': '+1,5 buts',
                 'odds': over_goals[1.5]
             }
@@ -264,7 +287,8 @@ class FootballPredictionBot:
                     'chat_id': self.telegram_channel_id,
                     'text': message,
                     'parse_mode': 'HTML'
-                }
+                },
+                timeout=10
             )
             logger.info("Coupon envoyé avec succès" if response.ok else "Échec envoi coupon")
         except Exception as e:
