@@ -295,7 +295,7 @@ class FootballPredictionBot:
                 f"<b>💰 Cote: {pred['odds']}</b>\n"
             )
             if i < len(self.predictions):
-                message += "――――――――――――\n\n"
+                message += "――――――――――\n\n"
         
         message += f"\n<b>📊 COTE TOTALE: {self.coupon_total_odds}</b>\n\n"
         message += "<i>🔞 Pariez de manière responsable</i>"
